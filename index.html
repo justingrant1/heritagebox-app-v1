@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>HeritageBox Check-In</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <style>
+        * {
+            font-family: 'DM Sans', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        .mono {
+            font-family: 'DM Mono', monospace;
+        }
+        
+        body {
+            background: linear-gradient(145deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+            min-height: 100vh;
+        }
+        
+        .glass {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        .glass-light {
+            background: rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(10px);
+        }
+        
+        .scan-pulse {
+            animation: scanPulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes scanPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+            50% { box-shadow: 0 0 0 20px rgba(34, 197, 94, 0); }
+        }
+        
+        .glow-amber {
+            box-shadow: 0 0 30px rgba(251, 191, 36, 0.3);
+        }
+        
+        .glow-green {
+            box-shadow: 0 0 30px rgba(34, 197, 94, 0.3);
+        }
+        
+        .glow-red {
+            box-shadow: 0 0 30px rgba(239, 68, 68, 0.3);
+        }
+        
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .slide-up {
+            animation: slideUp 0.4s ease-out;
+        }
+        
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        #reader {
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        
+        #reader video {
+            border-radius: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // ============================================
+        // CONFIGURATION - UPDATE THESE VALUES
+        // ============================================
+        const CONFIG = {
+            // Airtable Configuration
+            AIRTABLE_API_KEY: 'YOUR_AIRTABLE_API_KEY', // Get from https://airtable.com/create/tokens
+            AIRTABLE_BASE_ID: 'YOUR_BASE_ID',          // Found in your Airtable URL
+            AIRTABLE_TABLE_NAME: 'Orders',
+            
+            // Stripe Configuration  
+            STRIPE_SECRET_KEY: 'YOUR_STRIPE_SECRET_KEY', // From Stripe Dashboard
+            
+            // Pricing
+            EXTRA_ITEM_PRICE: 15.00, // $15 per extra item
+        };
+
+        // ============================================
+        // AIRTABLE SERVICE
+        // ============================================
+        const AirtableService = {
+            async findOrderByTracking(trackingNumber) {
+                const formula = `OR(
+                    {Label 1 Tracking}='${trackingNumber}',
+                    {Label 2 Tracking}='${trackingNumber}',
+                    {Label 3 Tracking}='${trackingNumber}'
+                )`;
+                
+                const url = `https://api.airtable.com/v0/${CONFIG.AIRTABLE_BASE_ID}/${encodeURIComponent(CONFIG.AIRTABLE_TABLE_NAME)}?filterByFormula=${encodeURIComponent(formula)}`;
+                
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `Bearer ${CONFIG.AIRTABLE_API_KEY}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) throw new Error('Airtable API error');
+                
+                const data = await response.json();
+                return data.records?.[0] || null;
+            },
+            
+            async updateOrder(recordId, fields) {
+                const url = `https://api.airtable.com/v0/${CONFIG.AIRTABLE_BASE_ID}/${encodeURIComponent(CONFIG.AIRTABLE_TABLE_NAME)}/${recordId}`;
+                
+                const response = await fetch(url, {
+                    method: 'PATCH',
+                    headers: {
+                        'Authorization': `Bearer ${CONFIG.AIRTABLE_API_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ fields })
+                });
+                
+                if (!response.ok) throw new Error('Failed to update order');
+                return response.json();
+            }
+        };
+
+        // ============================================
+        // STRIPE SERVICE (via backend proxy in production)
+        // ============================================
+        const StripeService = {
+            // NOTE: In production, these calls should go through YOUR backend
+            // Never expose secret keys in frontend code
+            async createInvoice(customerEmail, orderNumber, extraItems, amount) {
+                // This is a placeholder - implement via your backend
+                console.log('Creating invoice:', { customerEmail, orderNumber, extraItems, amount });
+                
+                // Example backend call:
+                // const response = await fetch('/api/create-invoice', {
+                //     method: 'POST',
+                //     headers: { 'Content-Type': 'application/json' },
+                //     body: JSON.stringify({ customerEmail, orderNumber, extraItems, amount })
+                // });
+                // return response.json();
+                
+                return { 
+                    success: true, 
+                    invoiceId: `inv_demo_${Date.now()}`,
+                    message: 'Invoice created (demo mode)'
+                };
+            }
+        };
+
+        // ============================================
+        // MOCK DATA FOR DEMO
+        // ============================================
+        const DEMO_ORDERS = {
+            '1ZB8F618YW78008760': {
+                id: 'rec123',
+                fields: {
+                    'Order Number': 'HB-566254-001',
+                    'Customer': 'Daren Rasmussen',
+                    'Status': 'Shipped',
+                    'Package Items Included': 10,
+                    'Items Received': null,
+                    'Label 1 Tracking': '1ZB8F618YW78008760'
+                }
+            },
+            '1Z0Y3G510332745876': {
+                id: 'rec456',
+                fields: {
+                    'Order Number': 'HB-988907-892',
+                    'Customer': 'Katie Iwanski',
+                    'Status': 'Shipped',
+                    'Package Items Included': 25,
+                    'Items Received': null,
+                    'Label 1 Tracking': '1Z0Y3G510332745876'
+                }
+            },
+            '1ZB8F618YW78920854': {
+                id: 'rec789',
+                fields: {
+                    'Order Number': 'HB-800002-379',
+                    'Customer': 'Michael Urban',
+                    'Status': 'Shipped',
+                    'Package Items Included': 15,
+                    'Items Received': null,
+                    'Label 1 Tracking': '1ZB8F618YW78920854'
+                }
+            }
+        };
+
+        // ============================================
+        // MAIN APP COMPONENT
+        // ============================================
+        function App() {
+            const [screen, setScreen] = useState('scan'); // scan, order, success
+            const [order, setOrder] = useState(null);
+            const [itemCount, setItemCount] = useState('');
+            const [isScanning, setIsScanning] = useState(false);
+            const [error, setError] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const [manualTracking, setManualTracking] = useState('');
+            const [invoiceResult, setInvoiceResult] = useState(null);
+            const [useDemo, setUseDemo] = useState(true);
+            const scannerRef = useRef(null);
+
+            // Start barcode scanner
+            const startScanner = async () => {
+                setError('');
+                setIsScanning(true);
+                
+                try {
+                    const html5QrCode = new Html5Qrcode("reader");
+                    scannerRef.current = html5QrCode;
+                    
+                    await html5QrCode.start(
+                        { facingMode: "environment" },
+                        {
+                            fps: 10,
+                            qrbox: { width: 280, height: 150 },
+                            aspectRatio: 1.777
+                        },
+                        (decodedText) => {
+                            handleScan(decodedText);
+                            stopScanner();
+                        },
+                        (errorMessage) => {
+                            // Ignore scan errors
+                        }
+                    );
+                } catch (err) {
+                    setError('Camera access denied. Please allow camera permissions or enter tracking manually.');
+                    setIsScanning(false);
+                }
+            };
+
+            const stopScanner = async () => {
+                if (scannerRef.current) {
+                    try {
+                        await scannerRef.current.stop();
+                        scannerRef.current = null;
+                    } catch (e) {}
+                }
+                setIsScanning(false);
+            };
+
+            // Handle scanned barcode
+            const handleScan = async (trackingNumber) => {
+                setIsLoading(true);
+                setError('');
+                
+                try {
+                    let foundOrder;
+                    
+                    if (useDemo) {
+                        // Demo mode - use mock data
+                        foundOrder = DEMO_ORDERS[trackingNumber];
+                        await new Promise(r => setTimeout(r, 500)); // Simulate API delay
+                    } else {
+                        // Production mode - use Airtable
+                        foundOrder = await AirtableService.findOrderByTracking(trackingNumber);
+                    }
+                    
+                    if (foundOrder) {
+                        setOrder(foundOrder);
+                        setItemCount(foundOrder.fields['Items Received']?.toString() || '');
+                        setScreen('order');
+                    } else {
+                        setError(`No order found for tracking: ${trackingNumber}`);
+                    }
+                } catch (err) {
+                    setError('Failed to lookup order. Check your connection.');
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            // Handle manual tracking input
+            const handleManualSubmit = (e) => {
+                e.preventDefault();
+                if (manualTracking.trim()) {
+                    handleScan(manualTracking.trim());
+                }
+            };
+
+            // Calculate extra items
+            const getExtraItems = () => {
+                const expected = order?.fields['Package Items Included'] || 0;
+                const received = parseInt(itemCount) || 0;
+                return Math.max(0, received - expected);
+            };
+
+            // Submit check-in
+            const handleSubmit = async () => {
+                if (!itemCount || parseInt(itemCount) < 0) {
+                    setError('Please enter a valid item count');
+                    return;
+                }
+                
+                setIsLoading(true);
+                setError('');
+                
+                const extraItems = getExtraItems();
+                const extraCharge = extraItems * CONFIG.EXTRA_ITEM_PRICE;
+                
+                try {
+                    // Update Airtable
+                    if (!useDemo) {
+                        await AirtableService.updateOrder(order.id, {
+                            'Items Received': parseInt(itemCount),
+                            'Extra Items': extraItems,
+                            'Extra Items Charge': extraCharge,
+                            'Status': 'Received'
+                        });
+                    }
+                    
+                    // Create Stripe invoice if there are extra items
+                    if (extraItems > 0) {
+                        const invoice = await StripeService.createInvoice(
+                            order.fields['Customer'],
+                            order.fields['Order Number'],
+                            extraItems,
+                            extraCharge
+                        );
+                        setInvoiceResult(invoice);
+                    }
+                    
+                    setScreen('success');
+                } catch (err) {
+                    setError('Failed to save. Please try again.');
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            // Reset for new scan
+            const resetApp = () => {
+                setScreen('scan');
+                setOrder(null);
+                setItemCount('');
+                setManualTracking('');
+                setError('');
+                setInvoiceResult(null);
+            };
+
+            // Cleanup scanner on unmount
+            useEffect(() => {
+                return () => stopScanner();
+            }, []);
+
+            return (
+                <div className="min-h-screen p-4 pb-8">
+                    {/* Header */}
+                    <header className="text-center mb-6 pt-2">
+                        <div className="flex items-center justify-center gap-2 mb-1">
+                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
+                                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                                </svg>
+                            </div>
+                            <h1 className="text-xl font-bold text-white">HeritageBox</h1>
+                        </div>
+                        <p className="text-slate-400 text-sm">Package Check-In</p>
+                    </header>
+
+                    {/* Demo Mode Toggle */}
+                    <div className="glass rounded-xl p-3 mb-4 flex items-center justify-between">
+                        <span className="text-slate-300 text-sm">Demo Mode</span>
+                        <button
+                            onClick={() => setUseDemo(!useDemo)}
+                            className={`w-12 h-6 rounded-full transition-colors relative ${useDemo ? 'bg-amber-500' : 'bg-slate-600'}`}
+                        >
+                            <div className={`w-5 h-5 bg-white rounded-full absolute top-0.5 transition-transform ${useDemo ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                        </button>
+                    </div>
+
+                    {/* Scan Screen */}
+                    {screen === 'scan' && (
+                        <div className="fade-in">
+                            {/* Scanner Area */}
+                            <div className="glass rounded-2xl p-4 mb-4">
+                                {isScanning ? (
+                                    <div>
+                                        <div id="reader" className="rounded-xl overflow-hidden mb-3"></div>
+                                        <button
+                                            onClick={stopScanner}
+                                            className="w-full py-3 bg-slate-700 text-white rounded-xl font-medium"
+                                        >
+                                            Cancel Scan
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <button
+                                        onClick={startScanner}
+                                        disabled={isLoading}
+                                        className="w-full py-16 border-2 border-dashed border-slate-600 rounded-xl flex flex-col items-center gap-3 hover:border-amber-500 transition-colors scan-pulse"
+                                    >
+                                        <div className="w-16 h-16 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
+                                            <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                                            </svg>
+                                        </div>
+                                        <span className="text-white font-medium">Tap to Scan Barcode</span>
+                                        <span className="text-slate-400 text-sm">Scan UPS tracking number</span>
+                                    </button>
+                                )}
+                                <div id="reader" className={isScanning ? '' : 'hidden'}></div>
+                            </div>
+
+                            {/* Manual Entry */}
+                            <div className="glass rounded-2xl p-4">
+                                <p className="text-slate-400 text-sm mb-3 text-center">Or enter tracking manually</p>
+                                <form onSubmit={handleManualSubmit} className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={manualTracking}
+                                        onChange={(e) => setManualTracking(e.target.value)}
+                                        placeholder="1Z..."
+                                        className="flex-1 bg-slate-800 text-white px-4 py-3 rounded-xl mono text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                                    />
+                                    <button
+                                        type="submit"
+                                        disabled={isLoading || !manualTracking.trim()}
+                                        className="px-6 py-3 bg-amber-500 text-white rounded-xl font-medium disabled:opacity-50"
+                                    >
+                                        {isLoading ? '...' : 'Go'}
+                                    </button>
+                                </form>
+                            </div>
+
+                            {/* Demo Tracking Numbers */}
+                            {useDemo && (
+                                <div className="mt-4 glass rounded-2xl p-4">
+                                    <p className="text-slate-400 text-sm mb-2">Demo tracking numbers:</p>
+                                    <div className="space-y-2">
+                                        {Object.keys(DEMO_ORDERS).map(tracking => (
+                                            <button
+                                                key={tracking}
+                                                onClick={() => handleScan(tracking)}
+                                                className="w-full text-left px-3 py-2 bg-slate-800 rounded-lg mono text-xs text-amber-400 hover:bg-slate-700 transition-colors"
+                                            >
+                                                {tracking}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Error Message */}
+                            {error && (
+                                <div className="mt-4 p-4 bg-red-500/20 border border-red-500/30 rounded-xl text-red-300 text-sm">
+                                    {error}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Order Screen */}
+                    {screen === 'order' && order && (
+                        <div className="slide-up">
+                            {/* Order Info Card */}
+                            <div className="glass rounded-2xl p-5 mb-4">
+                                <div className="flex items-start justify-between mb-4">
+                                    <div>
+                                        <p className="text-slate-400 text-xs mb-1">ORDER</p>
+                                        <p className="text-white font-bold text-lg mono">{order.fields['Order Number']}</p>
+                                    </div>
+                                    <span className="px-3 py-1 bg-blue-500/20 text-blue-300 rounded-full text-xs font-medium">
+                                        {order.fields['Status']}
+                                    </span>
+                                </div>
+                                
+                                <div className="border-t border-slate-700 pt-4">
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center">
+                                            <svg className="w-5 h-5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                            </svg>
+                                        </div>
+                                        <div>
+                                            <p className="text-white font-medium">{order.fields['Customer']}</p>
+                                            <p className="text-slate-400 text-sm">Customer</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Expected Items */}
+                            <div className="glass rounded-2xl p-5 mb-4">
+                                <p className="text-slate-400 text-sm mb-2">Expected Items in Package</p>
+                                <p className="text-4xl font-bold text-white">
+                                    {order.fields['Package Items Included'] || <span className="text-slate-500">Not set</span>}
+                                </p>
+                            </div>
+
+                            {/* Item Count Input */}
+                            <div className="glass rounded-2xl p-5 mb-4 glow-amber">
+                                <label className="text-slate-400 text-sm mb-3 block">Actual Items Received</label>
+                                <div className="flex items-center gap-4">
+                                    <button
+                                        onClick={() => setItemCount(Math.max(0, (parseInt(itemCount) || 0) - 1).toString())}
+                                        className="w-14 h-14 rounded-xl bg-slate-700 text-white text-2xl font-bold hover:bg-slate-600 transition-colors"
+                                    >
+                                        −
+                                    </button>
+                                    <input
+                                        type="number"
+                                        value={itemCount}
+                                        onChange={(e) => setItemCount(e.target.value)}
+                                        placeholder="0"
+                                        className="flex-1 bg-slate-800 text-white text-center text-4xl font-bold py-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 mono"
+                                    />
+                                    <button
+                                        onClick={() => setItemCount(((parseInt(itemCount) || 0) + 1).toString())}
+                                        className="w-14 h-14 rounded-xl bg-slate-700 text-white text-2xl font-bold hover:bg-slate-600 transition-colors"
+                                    >
+                                        +
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Extra Items Warning */}
+                            {getExtraItems() > 0 && (
+                                <div className="glass rounded-2xl p-5 mb-4 border-2 border-amber-500/50 glow-amber fade-in">
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center">
+                                            <svg className="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                            </svg>
+                                        </div>
+                                        <div>
+                                            <p className="text-amber-400 font-semibold">Extra Items Detected</p>
+                                            <p className="text-slate-400 text-sm">Invoice will be sent automatically</p>
+                                        </div>
+                                    </div>
+                                    <div className="bg-slate-800/50 rounded-xl p-4">
+                                        <div className="flex justify-between mb-2">
+                                            <span className="text-slate-400">Extra items</span>
+                                            <span className="text-white font-medium">{getExtraItems()}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-slate-400">Charge (${CONFIG.EXTRA_ITEM_PRICE}/item)</span>
+                                            <span className="text-amber-400 font-bold">${(getExtraItems() * CONFIG.EXTRA_ITEM_PRICE).toFixed(2)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Match indicator */}
+                            {itemCount && getExtraItems() === 0 && parseInt(itemCount) === (order.fields['Package Items Included'] || 0) && (
+                                <div className="glass rounded-2xl p-4 mb-4 border-2 border-green-500/50 glow-green fade-in">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                                            <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                            </svg>
+                                        </div>
+                                        <p className="text-green-400 font-medium">Count matches expected!</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Error Message */}
+                            {error && (
+                                <div className="mb-4 p-4 bg-red-500/20 border border-red-500/30 rounded-xl text-red-300 text-sm">
+                                    {error}
+                                </div>
+                            )}
+
+                            {/* Action Buttons */}
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={resetApp}
+                                    className="flex-1 py-4 bg-slate-700 text-white rounded-xl font-medium hover:bg-slate-600 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleSubmit}
+                                    disabled={isLoading || !itemCount}
+                                    className="flex-[2] py-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold disabled:opacity-50 transition-opacity"
+                                >
+                                    {isLoading ? 'Saving...' : 'Confirm Check-In'}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Success Screen */}
+                    {screen === 'success' && (
+                        <div className="slide-up text-center">
+                            <div className="glass rounded-2xl p-8 mb-6">
+                                <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center glow-green">
+                                    <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                </div>
+                                <h2 className="text-2xl font-bold text-white mb-2">Check-In Complete!</h2>
+                                <p className="text-slate-400 mb-6">
+                                    Order {order?.fields['Order Number']} has been updated.
+                                </p>
+                                
+                                <div className="bg-slate-800/50 rounded-xl p-4 text-left mb-6">
+                                    <div className="flex justify-between mb-2">
+                                        <span className="text-slate-400">Items received</span>
+                                        <span className="text-white font-medium">{itemCount}</span>
+                                    </div>
+                                    <div className="flex justify-between mb-2">
+                                        <span className="text-slate-400">Expected</span>
+                                        <span className="text-white font-medium">{order?.fields['Package Items Included'] || 'N/A'}</span>
+                                    </div>
+                                    {getExtraItems() > 0 && (
+                                        <>
+                                            <div className="border-t border-slate-700 my-3"></div>
+                                            <div className="flex justify-between mb-2">
+                                                <span className="text-amber-400">Extra items</span>
+                                                <span className="text-amber-400 font-medium">+{getExtraItems()}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-amber-400">Invoice amount</span>
+                                                <span className="text-amber-400 font-bold">${(getExtraItems() * CONFIG.EXTRA_ITEM_PRICE).toFixed(2)}</span>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+
+                                {invoiceResult && (
+                                    <div className="bg-amber-500/20 border border-amber-500/30 rounded-xl p-4 mb-6">
+                                        <p className="text-amber-300 text-sm">
+                                            📧 Invoice sent to customer
+                                            {useDemo && <span className="block text-xs mt-1 text-amber-400/70">(Demo mode - no actual invoice sent)</span>}
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <button
+                                onClick={resetApp}
+                                className="w-full py-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold"
+                            >
+                                Scan Next Package
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Loading Overlay */}
+                    {isLoading && (
+                        <div className="fixed inset-0 bg-slate-900/80 flex items-center justify-center z-50">
+                            <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
