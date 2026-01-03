@@ -34,7 +34,7 @@ const ORDERS_TABLE = 'Orders';
 // ============================================
 
 /**
- * Look up order by tracking number
+ * Look up order by tracking number (full or last 5 digits)
  * GET /api/orders/tracking/:trackingNumber
  */
 app.get('/api/orders/tracking/:trackingNumber', async (req, res) => {
@@ -43,20 +43,46 @@ app.get('/api/orders/tracking/:trackingNumber', async (req, res) => {
         
         console.log(`Looking up tracking number: ${trackingNumber}`);
         
-        // Build formula - trim whitespace and use exact match
-        const formula = `OR({Label 1 Tracking}='${trackingNumber}',{Label 2 Tracking}='${trackingNumber}',{Label 3 Tracking}='${trackingNumber}')`;
+        let formula;
+        
+        // If 5 or fewer characters, search by last digits using RIGHT() function
+        if (trackingNumber.length <= 5) {
+            formula = `OR(
+                RIGHT({Label 1 Tracking}, ${trackingNumber.length})='${trackingNumber}',
+                RIGHT({Label 2 Tracking}, ${trackingNumber.length})='${trackingNumber}',
+                RIGHT({Label 3 Tracking}, ${trackingNumber.length})='${trackingNumber}'
+            )`;
+        } else {
+            // Full tracking number - exact match
+            formula = `OR({Label 1 Tracking}='${trackingNumber}',{Label 2 Tracking}='${trackingNumber}',{Label 3 Tracking}='${trackingNumber}')`;
+        }
         
         console.log(`Using formula: ${formula}`);
         
         const records = await base(ORDERS_TABLE).select({
             filterByFormula: formula,
-            maxRecords: 1
+            maxRecords: 10 // Get more in case of duplicates
         }).firstPage();
         
         console.log(`Found ${records.length} records`);
         
         if (records.length === 0) {
             return res.status(404).json({ error: 'Order not found', trackingNumber });
+        }
+        
+        // If multiple matches, return error with options
+        if (records.length > 1) {
+            const matches = records.map(r => ({
+                orderNumber: r.fields['Order Number'],
+                customer: r.fields['Customer Name'] || r.fields['Customer'],
+                tracking1: r.fields['Label 1 Tracking'],
+                tracking2: r.fields['Label 2 Tracking'],
+                tracking3: r.fields['Label 3 Tracking']
+            }));
+            return res.status(400).json({ 
+                error: 'Multiple orders match. Use more digits.', 
+                matches 
+            });
         }
         
         const record = records[0];

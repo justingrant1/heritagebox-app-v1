@@ -124,6 +124,10 @@
                 );
                 
                 if (response.status === 404) return null;
+                if (response.status === 400) {
+                    const data = await response.json();
+                    throw new Error(data.error || 'Multiple matches found');
+                }
                 if (!response.ok) throw new Error('API error');
                 
                 return response.json();
@@ -260,10 +264,10 @@
                         setItemCount(foundOrder.fields['Items Received']?.toString() || '');
                         setScreen('order');
                     } else {
-                        setError(`No order found for tracking: ${trackingNumber}`);
+                        setError(`No order found for: ${trackingNumber}`);
                     }
                 } catch (err) {
-                    setError('Failed to lookup order. Check your connection.');
+                    setError(err.message || 'Failed to lookup order. Check your connection.');
                 } finally {
                     setIsLoading(false);
                 }
@@ -409,7 +413,7 @@
                                         type="text"
                                         value={manualTracking}
                                         onChange={(e) => setManualTracking(e.target.value)}
-                                        placeholder="1Z..."
+                                        placeholder="Last 5 digits or full #"
                                         className="flex-1 bg-slate-800 text-white px-4 py-3 rounded-xl mono text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
                                     />
                                     <button
