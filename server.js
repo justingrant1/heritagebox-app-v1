@@ -137,65 +137,94 @@ app.post('/api/orders/:recordId/checkin', async (req, res) => {
         const { recordId } = req.params;
         const { itemsReceived } = req.body;
         
+        console.log(`Checking in order ${recordId} with ${itemsReceived} items`);
+        
         // Get current order
         const order = await base(ORDERS_TABLE).find(recordId);
         const expectedItems = order.fields['Package Items Included'] || 0;
         const extraItems = Math.max(0, itemsReceived - expectedItems);
         const extraCharge = extraItems * EXTRA_ITEM_PRICE;
         
+        console.log(`Expected: ${expectedItems}, Received: ${itemsReceived}, Extra: ${extraItems}`);
+        
         let invoiceId = null;
         let invoiceUrl = null;
         
         // Create Stripe invoice if there are extra items
         if (extraItems > 0) {
-            const customerEmail = order.fields['Customer Email'];
-            const orderNumber = order.fields['Order Number'];
-            
-            // Find or create Stripe customer
-            let customer;
-            const existingCustomers = await stripe.customers.list({
-                email: customerEmail,
-                limit: 1
-            });
-            
-            if (existingCustomers.data.length > 0) {
-                customer = existingCustomers.data[0];
-            } else {
-                customer = await stripe.customers.create({
-                    email: customerEmail,
-                    name: order.fields['Customer'],
-                    metadata: {
-                        airtable_order: orderNumber
-                    }
-                });
+            // Handle Customer Email - might be array from lookup field
+            let customerEmail = order.fields['Customer Email'];
+            if (Array.isArray(customerEmail)) {
+                customerEmail = customerEmail[0];
             }
             
-            // Create invoice
-            const invoice = await stripe.invoices.create({
-                customer: customer.id,
-                collection_method: 'send_invoice',
-                days_until_due: 7,
-                metadata: {
-                    order_number: orderNumber,
-                    extra_items: extraItems.toString()
+            // Handle Customer Name - might be array from linked field
+            let customerName = order.fields['Customer Name'] || order.fields['Customer'];
+            if (Array.isArray(customerName)) {
+                customerName = customerName[0];
+            }
+            
+            const orderNumber = order.fields['Order Number'];
+            
+            console.log(`Creating invoice for ${customerEmail}, order ${orderNumber}`);
+            
+            if (!customerEmail) {
+                console.error('No customer email found for order');
+                // Continue without invoice - don't fail the whole check-in
+            } else {
+                try {
+                    // Find or create Stripe customer
+                    let customer;
+                    const existingCustomers = await stripe.customers.list({
+                        email: customerEmail,
+                        limit: 1
+                    });
+                    
+                    if (existingCustomers.data.length > 0) {
+                        customer = existingCustomers.data[0];
+                    } else {
+                        customer = await stripe.customers.create({
+                            email: customerEmail,
+                            name: customerName || 'Customer',
+                            metadata: {
+                                airtable_order: orderNumber
+                            }
+                        });
+                    }
+                    
+                    // Create invoice
+                    const invoice = await stripe.invoices.create({
+                        customer: customer.id,
+                        collection_method: 'send_invoice',
+                        days_until_due: 7,
+                        metadata: {
+                            order_number: orderNumber,
+                            extra_items: extraItems.toString()
+                        }
+                    });
+                    
+                    // Add line item
+                    await stripe.invoiceItems.create({
+                        customer: customer.id,
+                        invoice: invoice.id,
+                        amount: Math.round(extraCharge * 100), // Stripe uses cents
+                        currency: 'usd',
+                        description: `Additional digitization items (${extraItems} items @ $${EXTRA_ITEM_PRICE}/each) - Order ${orderNumber}`
+                    });
+                    
+                    // Finalize and send
+                    const finalizedInvoice = await stripe.invoices.finalizeInvoice(invoice.id);
+                    await stripe.invoices.sendInvoice(finalizedInvoice.id);
+                    
+                    invoiceId = finalizedInvoice.id;
+                    invoiceUrl = finalizedInvoice.hosted_invoice_url;
+                    
+                    console.log(`Invoice created: ${invoiceId}`);
+                } catch (stripeError) {
+                    console.error('Stripe error:', stripeError.message);
+                    // Continue without invoice - don't fail the whole check-in
                 }
-            });
-            
-            // Add line item
-            await stripe.invoiceItems.create({
-                customer: customer.id,
-                invoice: invoice.id,
-                amount: Math.round(extraCharge * 100), // Stripe uses cents
-                currency: 'usd',
-                description: `Additional digitization items (${extraItems} items @ $${EXTRA_ITEM_PRICE}/each) - Order ${orderNumber}`
-            });
-            
-            // Finalize and send
-            const finalizedInvoice = await stripe.invoices.finalizeInvoice(invoice.id);
-            await stripe.invoices.sendInvoice(finalizedInvoice.id);
-            
-            invoiceId = finalizedInvoice.id;
-            invoiceUrl = finalizedInvoice.hosted_invoice_url;
+            }
         }
         
         // Update Airtable
@@ -206,6 +235,8 @@ app.post('/api/orders/:recordId/checkin', async (req, res) => {
             'Status': 'Received',
             ...(invoiceId && { 'Extra Items Invoice ID': invoiceId })
         });
+        
+        console.log(`Order ${recordId} updated successfully`);
         
         res.json({
             success: true,
@@ -221,7 +252,8 @@ app.post('/api/orders/:recordId/checkin', async (req, res) => {
         });
         
     } catch (error) {
-        console.error('Error checking in order:', error);
+        console.error('Error checking in order:', error.message);
+        console.error('Full error:', error);
         res.status(500).json({ error: 'Failed to check in order', details: error.message });
     }
 });
