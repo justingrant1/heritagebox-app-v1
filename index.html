@@ -104,87 +104,43 @@
         const { useState, useEffect, useRef } = React;
 
         // ============================================
-        // CONFIGURATION - UPDATE THESE VALUES
+        // CONFIGURATION
         // ============================================
         const CONFIG = {
-            // Airtable Configuration
-            AIRTABLE_API_KEY: 'YOUR_AIRTABLE_API_KEY', // Get from https://airtable.com/create/tokens
-            AIRTABLE_BASE_ID: 'YOUR_BASE_ID',          // Found in your Airtable URL
-            AIRTABLE_TABLE_NAME: 'Orders',
+            // Backend API URL (your Render deployment)
+            API_BASE_URL: 'https://heritagebox-app-v1.onrender.com',
             
-            // Stripe Configuration  
-            STRIPE_SECRET_KEY: 'YOUR_STRIPE_SECRET_KEY', // From Stripe Dashboard
-            
-            // Pricing
+            // Pricing (for display only - actual pricing is in backend)
             EXTRA_ITEM_PRICE: 15.00, // $15 per extra item
         };
 
         // ============================================
-        // AIRTABLE SERVICE
+        // API SERVICE (calls your backend)
         // ============================================
-        const AirtableService = {
+        const ApiService = {
             async findOrderByTracking(trackingNumber) {
-                const formula = `OR(
-                    {Label 1 Tracking}='${trackingNumber}',
-                    {Label 2 Tracking}='${trackingNumber}',
-                    {Label 3 Tracking}='${trackingNumber}'
-                )`;
+                const response = await fetch(
+                    `${CONFIG.API_BASE_URL}/api/orders/tracking/${encodeURIComponent(trackingNumber)}`
+                );
                 
-                const url = `https://api.airtable.com/v0/${CONFIG.AIRTABLE_BASE_ID}/${encodeURIComponent(CONFIG.AIRTABLE_TABLE_NAME)}?filterByFormula=${encodeURIComponent(formula)}`;
+                if (response.status === 404) return null;
+                if (!response.ok) throw new Error('API error');
                 
-                const response = await fetch(url, {
-                    headers: {
-                        'Authorization': `Bearer ${CONFIG.AIRTABLE_API_KEY}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                if (!response.ok) throw new Error('Airtable API error');
-                
-                const data = await response.json();
-                return data.records?.[0] || null;
+                return response.json();
             },
             
-            async updateOrder(recordId, fields) {
-                const url = `https://api.airtable.com/v0/${CONFIG.AIRTABLE_BASE_ID}/${encodeURIComponent(CONFIG.AIRTABLE_TABLE_NAME)}/${recordId}`;
+            async checkInOrder(recordId, itemsReceived) {
+                const response = await fetch(
+                    `${CONFIG.API_BASE_URL}/api/orders/${recordId}/checkin`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ itemsReceived })
+                    }
+                );
                 
-                const response = await fetch(url, {
-                    method: 'PATCH',
-                    headers: {
-                        'Authorization': `Bearer ${CONFIG.AIRTABLE_API_KEY}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ fields })
-                });
-                
-                if (!response.ok) throw new Error('Failed to update order');
+                if (!response.ok) throw new Error('Failed to check in order');
                 return response.json();
-            }
-        };
-
-        // ============================================
-        // STRIPE SERVICE (via backend proxy in production)
-        // ============================================
-        const StripeService = {
-            // NOTE: In production, these calls should go through YOUR backend
-            // Never expose secret keys in frontend code
-            async createInvoice(customerEmail, orderNumber, extraItems, amount) {
-                // This is a placeholder - implement via your backend
-                console.log('Creating invoice:', { customerEmail, orderNumber, extraItems, amount });
-                
-                // Example backend call:
-                // const response = await fetch('/api/create-invoice', {
-                //     method: 'POST',
-                //     headers: { 'Content-Type': 'application/json' },
-                //     body: JSON.stringify({ customerEmail, orderNumber, extraItems, amount })
-                // });
-                // return response.json();
-                
-                return { 
-                    success: true, 
-                    invoiceId: `inv_demo_${Date.now()}`,
-                    message: 'Invoice created (demo mode)'
-                };
             }
         };
 
@@ -295,8 +251,8 @@
                         foundOrder = DEMO_ORDERS[trackingNumber];
                         await new Promise(r => setTimeout(r, 500)); // Simulate API delay
                     } else {
-                        // Production mode - use Airtable
-                        foundOrder = await AirtableService.findOrderByTracking(trackingNumber);
+                        // Production mode - use backend API
+                        foundOrder = await ApiService.findOrderByTracking(trackingNumber);
                     }
                     
                     if (foundOrder) {
@@ -342,25 +298,25 @@
                 const extraCharge = extraItems * CONFIG.EXTRA_ITEM_PRICE;
                 
                 try {
-                    // Update Airtable
-                    if (!useDemo) {
-                        await AirtableService.updateOrder(order.id, {
-                            'Items Received': parseInt(itemCount),
-                            'Extra Items': extraItems,
-                            'Extra Items Charge': extraCharge,
-                            'Status': 'Received'
-                        });
-                    }
-                    
-                    // Create Stripe invoice if there are extra items
-                    if (extraItems > 0) {
-                        const invoice = await StripeService.createInvoice(
-                            order.fields['Customer'],
-                            order.fields['Order Number'],
-                            extraItems,
-                            extraCharge
+                    if (useDemo) {
+                        // Demo mode - just simulate success
+                        await new Promise(r => setTimeout(r, 800));
+                        if (extraItems > 0) {
+                            setInvoiceResult({ 
+                                success: true, 
+                                invoiceId: `inv_demo_${Date.now()}` 
+                            });
+                        }
+                    } else {
+                        // Production mode - call backend API
+                        const result = await ApiService.checkInOrder(
+                            order.id, 
+                            parseInt(itemCount)
                         );
-                        setInvoiceResult(invoice);
+                        
+                        if (result.invoice) {
+                            setInvoiceResult(result.invoice);
+                        }
                     }
                     
                     setScreen('success');
