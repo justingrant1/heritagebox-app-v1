@@ -34,6 +34,30 @@ const ORDERS_TABLE = 'Orders';
 // ============================================
 
 /**
+ * Get active employees
+ * GET /api/employees
+ */
+app.get('/api/employees', async (req, res) => {
+    try {
+        const records = await base('Employees').select({
+            filterByFormula: "{Active}=TRUE()",
+            fields: ['Employee Name'],
+            sort: [{ field: 'Employee Name', direction: 'asc' }]
+        }).firstPage();
+        
+        const employees = records.map(r => ({
+            id: r.id,
+            name: r.fields['Employee Name']
+        }));
+        
+        res.json({ employees });
+    } catch (error) {
+        console.error('Error fetching employees:', error.message);
+        res.status(500).json({ error: 'Failed to fetch employees' });
+    }
+});
+
+/**
  * Look up order by tracking number (full or last 5 digits)
  * GET /api/orders/tracking/:trackingNumber
  */
@@ -130,14 +154,14 @@ app.get('/api/orders/tracking/:trackingNumber', async (req, res) => {
 /**
  * Check in a package and create invoice if needed
  * POST /api/orders/:recordId/checkin
- * Body: { itemsReceived: number }
+ * Body: { itemsReceived: number, employeeId: string }
  */
 app.post('/api/orders/:recordId/checkin', async (req, res) => {
     try {
         const { recordId } = req.params;
-        const { itemsReceived } = req.body;
+        const { itemsReceived, employeeId } = req.body;
         
-        console.log(`Checking in order ${recordId} with ${itemsReceived} items`);
+        console.log(`Checking in order ${recordId} with ${itemsReceived} items by employee ${employeeId}`);
         
         // Get current order
         const order = await base(ORDERS_TABLE).find(recordId);
@@ -228,13 +252,16 @@ app.post('/api/orders/:recordId/checkin', async (req, res) => {
         }
         
         // Update Airtable
-        const updatedRecord = await base(ORDERS_TABLE).update(recordId, {
+        const updateFields = {
             'Items Received': itemsReceived,
             'Extra Items': extraItems,
             'Extra Items Charge': extraCharge,
             'Status': 'Received',
-            ...(invoiceId && { 'Extra Items Invoice ID': invoiceId })
-        });
+            ...(invoiceId && { 'Extra Items Invoice ID': invoiceId }),
+            ...(employeeId && { 'Assigned Employee': [employeeId] })
+        };
+        
+        const updatedRecord = await base(ORDERS_TABLE).update(recordId, updateFields);
         
         console.log(`Order ${recordId} updated successfully`);
         
