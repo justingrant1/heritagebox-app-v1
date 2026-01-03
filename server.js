@@ -41,27 +41,63 @@ app.get('/api/orders/tracking/:trackingNumber', async (req, res) => {
     try {
         const { trackingNumber } = req.params;
         
+        console.log(`Looking up tracking number: ${trackingNumber}`);
+        
+        // Build formula - trim whitespace and use exact match
+        const formula = `OR({Label 1 Tracking}='${trackingNumber}',{Label 2 Tracking}='${trackingNumber}',{Label 3 Tracking}='${trackingNumber}')`;
+        
+        console.log(`Using formula: ${formula}`);
+        
         const records = await base(ORDERS_TABLE).select({
-            filterByFormula: `OR(
-                {Label 1 Tracking}='${trackingNumber}',
-                {Label 2 Tracking}='${trackingNumber}',
-                {Label 3 Tracking}='${trackingNumber}'
-            )`,
+            filterByFormula: formula,
             maxRecords: 1
         }).firstPage();
         
+        console.log(`Found ${records.length} records`);
+        
         if (records.length === 0) {
-            return res.status(404).json({ error: 'Order not found' });
+            return res.status(404).json({ error: 'Order not found', trackingNumber });
         }
         
         const record = records[0];
+        console.log(`Found order: ${record.fields['Order Number']}`);
+        
+        // Handle linked Customer field - fetch the actual customer name
+        let customerName = record.fields['Customer'];
+        
+        // If Customer is a linked record (array of IDs), fetch the name
+        if (Array.isArray(customerName) && customerName.length > 0) {
+            try {
+                // Try to use Customer Name lookup field first
+                if (record.fields['Customer Name']) {
+                    customerName = Array.isArray(record.fields['Customer Name']) 
+                        ? record.fields['Customer Name'][0] 
+                        : record.fields['Customer Name'];
+                } else {
+                    // Fallback: fetch from Customers table
+                    const customerRecord = await base('Customers').find(customerName[0]);
+                    customerName = customerRecord.fields['Name'] || customerRecord.fields['Customer Name'] || 'Unknown';
+                }
+            } catch (e) {
+                console.log('Could not fetch customer name:', e.message);
+                customerName = 'Customer';
+            }
+        }
+        
+        // Build response with cleaned up customer name
+        const responseFields = {
+            ...record.fields,
+            'Customer': customerName
+        };
+        
         res.json({
             id: record.id,
-            fields: record.fields
+            fields: responseFields
         });
     } catch (error) {
-        console.error('Error looking up order:', error);
-        res.status(500).json({ error: 'Failed to lookup order' });
+        console.error('Error looking up order:', error.message);
+        console.error('Full error:', error);
+        res.status(500).json({ error: 'Failed to lookup order', details: error.message });
     }
 });
 
