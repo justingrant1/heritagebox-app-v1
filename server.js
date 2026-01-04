@@ -375,26 +375,30 @@ app.post('/api/orders/:recordId/checkin', async (req, res) => {
 app.post('/api/orders/:recordId/complete', async (req, res) => {
     try {
         const { recordId } = req.params;
-        const { itemsDigitized, employeeId } = req.body;
+        const { itemsDigitized, employeeId, employeeName } = req.body;
         
-        console.log(`Completing order ${recordId} with ${itemsDigitized} items digitized by ${employeeId}`);
+        console.log(`Completing order ${recordId} with ${itemsDigitized} items digitized by ${employeeName || employeeId}`);
         
-        // Calculate pay
+        // Calculate pay for response (Airtable will calculate via formulas)
         const basePay = BASE_PAY;
         const perItemPay = itemsDigitized * PER_ITEM_PAY;
         const totalPay = basePay + perItemPay;
         
-        // Update order
+        // Update order - don't include computed fields (Base Pay, Per Item Pay, Total Order Pay)
+        // Those are formulas in Airtable that auto-calculate
         const updateFields = {
             'Items Digitized': itemsDigitized,
             'Digitization Complete': true,
             'Digitization Completion Date': new Date().toISOString().split('T')[0],
-            'Status': 'Complete',
-            'Base Pay': basePay,
-            'Per Item Pay': perItemPay,
-            'Total Order Pay': totalPay,
-            ...(employeeId && { 'Employee Link': [employeeId] })
+            'Status': 'Complete'
         };
+        
+        // Add Employee Link if we have employee info (it's a linked record field)
+        if (employeeId) {
+            updateFields['Employee Link'] = [employeeId];
+        }
+        
+        console.log('Update fields:', JSON.stringify(updateFields));
         
         const updatedRecord = await base(ORDERS_TABLE).update(recordId, updateFields);
         
@@ -408,6 +412,7 @@ app.post('/api/orders/:recordId/complete', async (req, res) => {
         
     } catch (error) {
         console.error('Error completing order:', error.message);
+        console.error('Full error:', error);
         res.status(500).json({ error: 'Failed to complete order', details: error.message });
     }
 });
