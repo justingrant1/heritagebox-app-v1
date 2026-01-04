@@ -102,22 +102,22 @@
                 return response.json();
             },
 
-            async completeDigitization(orderId, itemsDigitized, employeeId) {
+            async completeDigitization(orderId, itemsDigitized, employeeId, employeeName) {
                 const response = await fetch(
                     `${CONFIG.API_BASE_URL}/api/orders/${orderId}/complete`,
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ itemsDigitized, employeeId })
+                        body: JSON.stringify({ itemsDigitized, employeeId, employeeName })
                     }
                 );
                 if (!response.ok) throw new Error('Failed to complete order');
                 return response.json();
             },
 
-            async getMyPay(employeeId) {
+            async getMyPay(employeeId, employeeName) {
                 const response = await fetch(
-                    `${CONFIG.API_BASE_URL}/api/employees/${employeeId}/pay`
+                    `${CONFIG.API_BASE_URL}/api/employees/${employeeId}/pay?name=${encodeURIComponent(employeeName || '')}`
                 );
                 if (!response.ok) throw new Error('Failed to fetch pay info');
                 return response.json();
@@ -465,7 +465,7 @@
                 setIsSubmitting(true);
                 setError('');
                 try {
-                    await ApiService.completeDigitization(selectedOrder.id, parseInt(itemsDigitized), selectedEmployee);
+                    await ApiService.completeDigitization(selectedOrder.id, parseInt(itemsDigitized), selectedEmployee, employeeName);
                     playSuccessFeedback();
                     setSelectedOrder(null);
                     setItemsDigitized('');
@@ -593,11 +593,11 @@
             useEffect(() => {
                 if (!selectedEmployee) return;
                 setIsLoading(true);
-                ApiService.getMyPay(selectedEmployee)
+                ApiService.getMyPay(selectedEmployee, employeeName)
                     .then(data => setPayData(data))
                     .catch(() => {})
                     .finally(() => setIsLoading(false));
-            }, [selectedEmployee]);
+            }, [selectedEmployee, employeeName]);
 
             if (!selectedEmployee) {
                 return (

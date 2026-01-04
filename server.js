@@ -137,13 +137,32 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
 app.get('/api/employees/:employeeId/pay', async (req, res) => {
     try {
         const { employeeId } = req.params;
+        const employeeName = req.query.name;
         
-        // Get completed orders for this employee
-        const completedOrders = await base(ORDERS_TABLE).select({
-            filterByFormula: `AND({Digitization Complete}=TRUE(), FIND('${employeeId}', ARRAYJOIN({Employee Link})))`,
-            fields: ['Order Number', 'Items Digitized', 'Base Pay', 'Per Item Pay', 'Total Order Pay', 'Digitization Completion Date'],
+        console.log(`Fetching pay info for employee: ${employeeId}, name: ${employeeName}`);
+        
+        // Get all completed orders and filter in code
+        const allCompleted = await base(ORDERS_TABLE).select({
+            filterByFormula: `{Digitization Complete}=TRUE()`,
+            fields: ['Order Number', 'Items Digitized', 'Base Pay', 'Per Item Pay', 'Total Order Pay', 'Digitization Completion Date', 'Employee Link'],
             sort: [{ field: 'Digitization Completion Date', direction: 'desc' }]
         }).firstPage();
+        
+        console.log(`Found ${allCompleted.length} total completed orders`);
+        
+        // Filter for this employee's orders
+        const completedOrders = allCompleted.filter(r => {
+            const empLink = r.fields['Employee Link'];
+            if (!empLink) return false;
+            
+            // Handle linked record (array of IDs)
+            if (Array.isArray(empLink)) {
+                return empLink.includes(employeeId);
+            }
+            return empLink === employeeId;
+        });
+        
+        console.log(`Found ${completedOrders.length} orders for employee ${employeeId}`);
         
         // Calculate stats
         let totalEarnings = 0;
@@ -172,6 +191,8 @@ app.get('/api/employees/:employeeId/pay', async (req, res) => {
             totalOrders++;
             totalItems += (r.fields['Items Digitized'] || 0);
         });
+        
+        console.log(`Total earnings: $${totalEarnings}, orders: ${totalOrders}, items: ${totalItems}`);
         
         // Get current pay period
         let currentPeriod = { name: 'Current Period', totalEarnings: 0 };
