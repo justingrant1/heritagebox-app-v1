@@ -77,7 +77,7 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
         // Get all non-complete orders and filter in code for more reliable matching
         const records = await base(ORDERS_TABLE).select({
             filterByFormula: `{Status}!='Complete'`,
-            fields: ['Order Number', 'Customer', 'Customer Name', 'Items Received', 'Status', 'Package Items Included', 'Assigned Employee'],
+            fields: ['Order Number', 'Customer', 'Customer Name', 'Items Received', 'Status', 'Package Items Included', 'Assigned Employee', 'Check-In Notes'],
             sort: [{ field: 'Created Time', direction: 'asc' }]
         }).firstPage();
         
@@ -118,7 +118,8 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
                     'Customer': customerName,
                     'Items Received': r.fields['Items Received'],
                     'Status': r.fields['Status'],
-                    'Package Items Included': r.fields['Package Items Included']
+                    'Package Items Included': r.fields['Package Items Included'],
+                    'Check-In Notes': r.fields['Check-In Notes'] || ''
                 }
             };
         });
@@ -302,7 +303,7 @@ app.get('/api/orders/tracking/:trackingNumber', async (req, res) => {
 app.post('/api/orders/:recordId/checkin', async (req, res) => {
     try {
         const { recordId } = req.params;
-        const { itemsReceived, employeeId, employeeName } = req.body;
+        const { itemsReceived, employeeId, employeeName, notes } = req.body;
         
         console.log(`Checking in order ${recordId} with ${itemsReceived} items by employee ${employeeName || employeeId}`);
         
@@ -372,7 +373,8 @@ app.post('/api/orders/:recordId/checkin', async (req, res) => {
             'Extra Items Charge': extraCharge,
             'Status': 'Received',
             ...(invoiceId && { 'Extra Items Invoice ID': invoiceId }),
-            ...(employeeName && { 'Assigned Employee': employeeName })
+            ...(employeeName && { 'Assigned Employee': employeeName }),
+            ...(notes && { 'Check-In Notes': notes })
         };
         
         const updatedRecord = await base(ORDERS_TABLE).update(recordId, updateFields);
@@ -386,6 +388,32 @@ app.post('/api/orders/:recordId/checkin', async (req, res) => {
     } catch (error) {
         console.error('Error checking in order:', error.message);
         res.status(500).json({ error: 'Failed to check in order', details: error.message });
+    }
+});
+
+/**
+ * Update order notes
+ * PATCH /api/orders/:recordId/notes
+ */
+app.patch('/api/orders/:recordId/notes', async (req, res) => {
+    try {
+        const { recordId } = req.params;
+        const { notes } = req.body;
+        
+        console.log(`Updating notes for order ${recordId}`);
+        
+        const updatedRecord = await base(ORDERS_TABLE).update(recordId, {
+            'Check-In Notes': notes || ''
+        });
+        
+        res.json({
+            success: true,
+            notes: updatedRecord.fields['Check-In Notes']
+        });
+        
+    } catch (error) {
+        console.error('Error updating notes:', error.message);
+        res.status(500).json({ error: 'Failed to update notes', details: error.message });
     }
 });
 
