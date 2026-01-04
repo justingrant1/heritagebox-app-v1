@@ -39,16 +39,19 @@ const ORDERS_TABLE = 'Orders';
  */
 app.get('/api/employees', async (req, res) => {
     try {
+        // Get all employees (filter Active in code to handle empty values)
         const records = await base('Employees').select({
-            filterByFormula: "{Active}=TRUE()",
-            fields: ['Employee Name'],
+            fields: ['Employee Name', 'Active'],
             sort: [{ field: 'Employee Name', direction: 'asc' }]
         }).firstPage();
         
-        const employees = records.map(r => ({
-            id: r.id,
-            name: r.fields['Employee Name']
-        }));
+        // Filter for active employees (Active = true or field doesn't exist)
+        const employees = records
+            .filter(r => r.fields['Active'] === true || r.fields['Active'] === undefined)
+            .map(r => ({
+                id: r.id,
+                name: r.fields['Employee Name']
+            }));
         
         res.json({ employees });
     } catch (error) {

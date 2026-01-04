@@ -205,7 +205,18 @@
             // Load employees on mount
             useEffect(() => {
                 ApiService.getEmployees()
-                    .then(data => setEmployees(data.employees || []))
+                    .then(data => {
+                        const empList = data.employees || [];
+                        setEmployees(empList);
+                        
+                        // If no employee selected, default to Eric Made
+                        if (!selectedEmployee && empList.length > 0) {
+                            const ericMade = empList.find(e => e.name === 'Eric Made');
+                            if (ericMade) {
+                                setSelectedEmployee(ericMade.id);
+                            }
+                        }
+                    })
                     .catch(err => console.error('Failed to load employees:', err));
             }, []);
 
