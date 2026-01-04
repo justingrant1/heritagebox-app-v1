@@ -81,22 +81,22 @@
                 return response.json();
             },
             
-            async checkInOrder(recordId, itemsReceived, employeeId) {
+            async checkInOrder(recordId, itemsReceived, employeeId, employeeName) {
                 const response = await fetch(
                     `${CONFIG.API_BASE_URL}/api/orders/${recordId}/checkin`,
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ itemsReceived, employeeId })
+                        body: JSON.stringify({ itemsReceived, employeeId, employeeName })
                     }
                 );
                 if (!response.ok) throw new Error('Failed to check in order');
                 return response.json();
             },
 
-            async getMyWork(employeeId) {
+            async getMyWork(employeeId, employeeName) {
                 const response = await fetch(
-                    `${CONFIG.API_BASE_URL}/api/employees/${employeeId}/work`
+                    `${CONFIG.API_BASE_URL}/api/employees/${employeeId}/work?name=${encodeURIComponent(employeeName || '')}`
                 );
                 if (!response.ok) throw new Error('Failed to fetch work queue');
                 return response.json();
@@ -158,6 +158,8 @@
             const [invoiceResult, setInvoiceResult] = useState(null);
             const [alreadyCheckedIn, setAlreadyCheckedIn] = useState(false);
             const scannerRef = useRef(null);
+            
+            const selectedEmployeeName = employees.find(e => e.id === selectedEmployee)?.name || '';
 
             const startScanner = async () => {
                 setError('');
@@ -223,7 +225,7 @@
                 setIsLoading(true);
                 setError('');
                 try {
-                    const result = await ApiService.checkInOrder(order.id, parseInt(itemCount), selectedEmployee);
+                    const result = await ApiService.checkInOrder(order.id, parseInt(itemCount), selectedEmployee, selectedEmployeeName);
                     if (result.invoice) setInvoiceResult(result.invoice);
                     playSuccessFeedback();
                     setScreen('success');
@@ -444,7 +446,7 @@
                 if (!selectedEmployee) return;
                 setIsLoading(true);
                 try {
-                    const data = await ApiService.getMyWork(selectedEmployee);
+                    const data = await ApiService.getMyWork(selectedEmployee, employeeName);
                     setWorkQueue(data.orders || []);
                 } catch (err) {
                     setError('Failed to load work queue');

@@ -70,15 +70,44 @@ app.get('/api/employees', async (req, res) => {
 app.get('/api/employees/:employeeId/work', async (req, res) => {
     try {
         const { employeeId } = req.params;
+        const employeeName = req.query.name; // Pass employee name as query param
         
-        // Get orders assigned to this employee that are NOT Complete
+        console.log(`Fetching work queue for employee: ${employeeId}, name: ${employeeName}`);
+        
+        // Get all non-complete orders and filter in code for more reliable matching
         const records = await base(ORDERS_TABLE).select({
-            filterByFormula: `AND({Status}!='Complete', FIND('${employeeId}', ARRAYJOIN({Assigned Employee})))`,
-            fields: ['Order Number', 'Customer', 'Customer Name', 'Items Received', 'Status', 'Package Items Included'],
+            filterByFormula: `{Status}!='Complete'`,
+            fields: ['Order Number', 'Customer', 'Customer Name', 'Items Received', 'Status', 'Package Items Included', 'Assigned Employee'],
             sort: [{ field: 'Created Time', direction: 'asc' }]
         }).firstPage();
         
-        const orders = records.map(r => {
+        console.log(`Found ${records.length} non-complete orders`);
+        
+        // Filter for orders assigned to this employee (by name or ID)
+        const filteredRecords = records.filter(r => {
+            const assignedEmployee = r.fields['Assigned Employee'];
+            if (!assignedEmployee) return false;
+            
+            // Handle single select (string name like "Justin")
+            if (typeof assignedEmployee === 'string') {
+                // Match by name if provided, or check if name contains employee ID
+                if (employeeName) {
+                    return assignedEmployee.toLowerCase() === employeeName.toLowerCase();
+                }
+                return false;
+            }
+            
+            // Handle array of linked record IDs
+            if (Array.isArray(assignedEmployee)) {
+                return assignedEmployee.includes(employeeId);
+            }
+            
+            return assignedEmployee === employeeId;
+        });
+        
+        console.log(`Found ${filteredRecords.length} orders assigned to employee`);
+        
+        const orders = filteredRecords.map(r => {
             let customerName = r.fields['Customer Name'] || r.fields['Customer'];
             if (Array.isArray(customerName)) customerName = customerName[0];
             
@@ -252,9 +281,9 @@ app.get('/api/orders/tracking/:trackingNumber', async (req, res) => {
 app.post('/api/orders/:recordId/checkin', async (req, res) => {
     try {
         const { recordId } = req.params;
-        const { itemsReceived, employeeId } = req.body;
+        const { itemsReceived, employeeId, employeeName } = req.body;
         
-        console.log(`Checking in order ${recordId} with ${itemsReceived} items by employee ${employeeId}`);
+        console.log(`Checking in order ${recordId} with ${itemsReceived} items by employee ${employeeName || employeeId}`);
         
         const order = await base(ORDERS_TABLE).find(recordId);
         const expectedItems = order.fields['Package Items Included'] || 0;
@@ -322,7 +351,7 @@ app.post('/api/orders/:recordId/checkin', async (req, res) => {
             'Extra Items Charge': extraCharge,
             'Status': 'Received',
             ...(invoiceId && { 'Extra Items Invoice ID': invoiceId }),
-            ...(employeeId && { 'Assigned Employee': [employeeId] })
+            ...(employeeName && { 'Assigned Employee': employeeName })
         };
         
         const updatedRecord = await base(ORDERS_TABLE).update(recordId, updateFields);
