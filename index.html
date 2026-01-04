@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>HeritageBox Check-In</title>
+    <title>HeritageBox Employee</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -17,84 +17,32 @@
             font-family: 'DM Sans', sans-serif;
             -webkit-tap-highlight-color: transparent;
         }
-        
-        .mono {
-            font-family: 'DM Mono', monospace;
-        }
-        
+        .mono { font-family: 'DM Mono', monospace; }
         body {
             background: linear-gradient(145deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
             min-height: 100vh;
+            padding-bottom: 80px;
         }
-        
         .glass {
             background: rgba(255, 255, 255, 0.03);
             backdrop-filter: blur(20px);
             border: 1px solid rgba(255, 255, 255, 0.08);
         }
-        
-        .glass-light {
-            background: rgba(255, 255, 255, 0.06);
-            backdrop-filter: blur(10px);
-        }
-        
-        .scan-pulse {
-            animation: scanPulse 2s ease-in-out infinite;
-        }
-        
-        @keyframes scanPulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
-            50% { box-shadow: 0 0 0 20px rgba(34, 197, 94, 0); }
-        }
-        
-        .glow-amber {
-            box-shadow: 0 0 30px rgba(251, 191, 36, 0.3);
-        }
-        
-        .glow-green {
-            box-shadow: 0 0 30px rgba(34, 197, 94, 0.3);
-        }
-        
-        .glow-red {
-            box-shadow: 0 0 30px rgba(239, 68, 68, 0.3);
-        }
-        
+        .glow-amber { box-shadow: 0 0 30px rgba(251, 191, 36, 0.3); }
+        .glow-green { box-shadow: 0 0 30px rgba(34, 197, 94, 0.3); }
+        .glow-red { box-shadow: 0 0 30px rgba(239, 68, 68, 0.3); }
+        .glow-blue { box-shadow: 0 0 30px rgba(59, 130, 246, 0.3); }
         input[type="number"]::-webkit-inner-spin-button,
-        input[type="number"]::-webkit-outer-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-        }
-        
-        input[type="number"] {
-            -moz-appearance: textfield;
-        }
-        
-        .fade-in {
-            animation: fadeIn 0.3s ease-out;
-        }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .slide-up {
-            animation: slideUp 0.4s ease-out;
-        }
-        
-        @keyframes slideUp {
-            from { opacity: 0; transform: translateY(30px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
-        #reader {
-            border-radius: 16px;
-            overflow: hidden;
-        }
-        
-        #reader video {
-            border-radius: 16px;
-        }
+        input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type="number"] { -moz-appearance: textfield; }
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .slide-up { animation: slideUp 0.4s ease-out; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+        .scan-pulse { animation: scanPulse 2s ease-in-out infinite; }
+        @keyframes scanPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); } 50% { box-shadow: 0 0 0 20px rgba(34, 197, 94, 0); } }
+        #reader { border-radius: 16px; overflow: hidden; }
+        #reader video { border-radius: 16px; }
     </style>
 </head>
 <body>
@@ -103,19 +51,15 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // ============================================
-        // CONFIGURATION
-        // ============================================
         const CONFIG = {
-            // Backend API URL (your Render deployment)
             API_BASE_URL: 'https://heritagebox-app-v1.onrender.com',
-            
-            // Pricing (for display only - actual pricing is in backend)
-            EXTRA_ITEM_PRICE: 15.00, // $15 per extra item
+            EXTRA_ITEM_PRICE: 15.00,
+            BASE_PAY: 7.50,
+            PER_ITEM_PAY: 2.00,
         };
 
         // ============================================
-        // API SERVICE (calls your backend)
+        // API SERVICE
         // ============================================
         const ApiService = {
             async getEmployees() {
@@ -128,14 +72,12 @@
                 const response = await fetch(
                     `${CONFIG.API_BASE_URL}/api/orders/tracking/${encodeURIComponent(trackingNumber)}`
                 );
-                
                 if (response.status === 404) return null;
                 if (response.status === 400) {
                     const data = await response.json();
                     throw new Error(data.error || 'Multiple matches found');
                 }
                 if (!response.ok) throw new Error('API error');
-                
                 return response.json();
             },
             
@@ -148,17 +90,65 @@
                         body: JSON.stringify({ itemsReceived, employeeId })
                     }
                 );
-                
                 if (!response.ok) throw new Error('Failed to check in order');
+                return response.json();
+            },
+
+            async getMyWork(employeeId) {
+                const response = await fetch(
+                    `${CONFIG.API_BASE_URL}/api/employees/${employeeId}/work`
+                );
+                if (!response.ok) throw new Error('Failed to fetch work queue');
+                return response.json();
+            },
+
+            async completeDigitization(orderId, itemsDigitized, employeeId) {
+                const response = await fetch(
+                    `${CONFIG.API_BASE_URL}/api/orders/${orderId}/complete`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ itemsDigitized, employeeId })
+                    }
+                );
+                if (!response.ok) throw new Error('Failed to complete order');
+                return response.json();
+            },
+
+            async getMyPay(employeeId) {
+                const response = await fetch(
+                    `${CONFIG.API_BASE_URL}/api/employees/${employeeId}/pay`
+                );
+                if (!response.ok) throw new Error('Failed to fetch pay info');
                 return response.json();
             }
         };
 
         // ============================================
-        // MAIN APP COMPONENT
+        // UTILITY FUNCTIONS
         // ============================================
-        function App() {
-            const [screen, setScreen] = useState('scan'); // scan, order, success
+        const playSuccessFeedback = () => {
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                oscillator.frequency.value = 800;
+                oscillator.type = 'sine';
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.3);
+            } catch (e) {}
+        };
+
+        // ============================================
+        // CHECK-IN TAB COMPONENT
+        // ============================================
+        function CheckInTab({ selectedEmployee, employees, setSelectedEmployee }) {
+            const [screen, setScreen] = useState('scan');
             const [order, setOrder] = useState(null);
             const [itemCount, setItemCount] = useState('');
             const [isScanning, setIsScanning] = useState(false);
@@ -166,182 +156,76 @@
             const [isLoading, setIsLoading] = useState(false);
             const [manualTracking, setManualTracking] = useState('');
             const [invoiceResult, setInvoiceResult] = useState(null);
-            const [employees, setEmployees] = useState([]);
-            const [selectedEmployee, setSelectedEmployee] = useState(() => {
-                // Load saved employee from localStorage
-                return localStorage.getItem('heritagebox_employee') || '';
-            });
             const [alreadyCheckedIn, setAlreadyCheckedIn] = useState(false);
             const scannerRef = useRef(null);
 
-            // Success feedback - vibration and sound
-            const playSuccessFeedback = () => {
-                // Vibrate if supported (mobile)
-                if (navigator.vibrate) {
-                    navigator.vibrate([100, 50, 100]);
-                }
-                
-                // Play success sound
-                try {
-                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    const oscillator = audioContext.createOscillator();
-                    const gainNode = audioContext.createGain();
-                    
-                    oscillator.connect(gainNode);
-                    gainNode.connect(audioContext.destination);
-                    
-                    oscillator.frequency.value = 800;
-                    oscillator.type = 'sine';
-                    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-                    
-                    oscillator.start(audioContext.currentTime);
-                    oscillator.stop(audioContext.currentTime + 0.3);
-                } catch (e) {
-                    console.log('Audio not supported');
-                }
-            };
-
-            // Load employees on mount
-            useEffect(() => {
-                ApiService.getEmployees()
-                    .then(data => {
-                        const empList = data.employees || [];
-                        setEmployees(empList);
-                        
-                        // If no employee selected, default to Eric Made
-                        if (!selectedEmployee && empList.length > 0) {
-                            const ericMade = empList.find(e => e.name === 'Eric Made');
-                            if (ericMade) {
-                                setSelectedEmployee(ericMade.id);
-                            }
-                        }
-                    })
-                    .catch(err => console.error('Failed to load employees:', err));
-            }, []);
-
-            // Save selected employee to localStorage
-            useEffect(() => {
-                if (selectedEmployee) {
-                    localStorage.setItem('heritagebox_employee', selectedEmployee);
-                }
-            }, [selectedEmployee]);
-
-            // Start barcode scanner
             const startScanner = async () => {
                 setError('');
                 setIsScanning(true);
-                
                 try {
                     const html5QrCode = new Html5Qrcode("reader");
                     scannerRef.current = html5QrCode;
-                    
                     await html5QrCode.start(
                         { facingMode: "environment" },
-                        {
-                            fps: 10,
-                            qrbox: { width: 280, height: 150 },
-                            aspectRatio: 1.777
-                        },
-                        (decodedText) => {
-                            handleScan(decodedText);
-                            stopScanner();
-                        },
-                        (errorMessage) => {
-                            // Ignore scan errors
-                        }
+                        { fps: 10, qrbox: { width: 280, height: 150 }, aspectRatio: 1.777 },
+                        (decodedText) => { handleScan(decodedText); stopScanner(); },
+                        () => {}
                     );
                 } catch (err) {
-                    setError('Camera access denied. Please allow camera permissions or enter tracking manually.');
+                    setError('Camera access denied. Enter tracking manually.');
                     setIsScanning(false);
                 }
             };
 
             const stopScanner = async () => {
                 if (scannerRef.current) {
-                    try {
-                        await scannerRef.current.stop();
-                        scannerRef.current = null;
-                    } catch (e) {}
+                    try { await scannerRef.current.stop(); } catch (e) {}
+                    scannerRef.current = null;
                 }
                 setIsScanning(false);
             };
 
-            // Handle scanned barcode
             const handleScan = async (trackingNumber) => {
                 setIsLoading(true);
                 setError('');
                 setAlreadyCheckedIn(false);
-                
                 try {
                     const foundOrder = await ApiService.findOrderByTracking(trackingNumber);
-                    
                     if (foundOrder) {
                         setOrder(foundOrder);
                         setItemCount(foundOrder.fields['Items Received']?.toString() || '');
-                        
-                        // Check if already checked in
-                        if (foundOrder.fields['Status'] === 'Received') {
-                            setAlreadyCheckedIn(true);
-                        }
-                        
+                        if (foundOrder.fields['Status'] === 'Received') setAlreadyCheckedIn(true);
                         setScreen('order');
                     } else {
                         setError(`No order found for: ${trackingNumber}`);
                     }
                 } catch (err) {
-                    setError(err.message || 'Failed to lookup order. Check your connection.');
+                    setError(err.message || 'Failed to lookup order.');
                 } finally {
                     setIsLoading(false);
                 }
             };
 
-            // Handle manual tracking input
             const handleManualSubmit = (e) => {
                 e.preventDefault();
-                if (manualTracking.trim()) {
-                    handleScan(manualTracking.trim());
-                }
+                if (manualTracking.trim()) handleScan(manualTracking.trim());
             };
 
-            // Calculate extra items
             const getExtraItems = () => {
                 const expected = order?.fields['Package Items Included'] || 0;
                 const received = parseInt(itemCount) || 0;
                 return Math.max(0, received - expected);
             };
 
-            // Submit check-in
             const handleSubmit = async () => {
-                if (!itemCount || parseInt(itemCount) < 0) {
-                    setError('Please enter a valid item count');
-                    return;
-                }
-                
-                if (!selectedEmployee) {
-                    setError('Please select your name first');
-                    return;
-                }
-                
+                if (!itemCount || parseInt(itemCount) < 0) { setError('Please enter a valid item count'); return; }
+                if (!selectedEmployee) { setError('Please select your name first'); return; }
                 setIsLoading(true);
                 setError('');
-                
-                const extraItems = getExtraItems();
-                
                 try {
-                    const result = await ApiService.checkInOrder(
-                        order.id, 
-                        parseInt(itemCount),
-                        selectedEmployee
-                    );
-                    
-                    if (result.invoice) {
-                        setInvoiceResult(result.invoice);
-                    }
-                    
-                    // Play success feedback
+                    const result = await ApiService.checkInOrder(order.id, parseInt(itemCount), selectedEmployee);
+                    if (result.invoice) setInvoiceResult(result.invoice);
                     playSuccessFeedback();
-                    
                     setScreen('success');
                 } catch (err) {
                     setError('Failed to save. Please try again.');
@@ -350,7 +234,6 @@
                 }
             };
 
-            // Reset for new scan
             const resetApp = () => {
                 setScreen('scan');
                 setOrder(null);
@@ -361,15 +244,472 @@
                 setAlreadyCheckedIn(false);
             };
 
-            // Cleanup scanner on unmount
-            useEffect(() => {
-                return () => stopScanner();
-            }, []);
+            useEffect(() => { return () => stopScanner(); }, []);
+
+            if (screen === 'scan') {
+                return (
+                    <div className="fade-in">
+                        <div className="glass rounded-xl p-3 mb-4">
+                            <label className="text-slate-400 text-xs mb-2 block">Checked in by</label>
+                            <select value={selectedEmployee} onChange={(e) => setSelectedEmployee(e.target.value)}
+                                className="w-full bg-slate-800 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm">
+                                <option value="">Select your name...</option>
+                                {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                            </select>
+                        </div>
+
+                        <div className="glass rounded-2xl p-4 mb-4">
+                            {isScanning ? (
+                                <div>
+                                    <div id="reader" className="rounded-xl overflow-hidden mb-3"></div>
+                                    <button onClick={stopScanner} className="w-full py-3 bg-slate-700 text-white rounded-xl font-medium">Cancel Scan</button>
+                                </div>
+                            ) : (
+                                <button onClick={startScanner} disabled={isLoading}
+                                    className="w-full py-16 border-2 border-dashed border-slate-600 rounded-xl flex flex-col items-center gap-3 hover:border-amber-500 transition-colors scan-pulse">
+                                    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
+                                        <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                                        </svg>
+                                    </div>
+                                    <span className="text-white font-medium">Tap to Scan Barcode</span>
+                                    <span className="text-slate-400 text-sm">Scan UPS tracking number</span>
+                                </button>
+                            )}
+                            <div id="reader" className={isScanning ? '' : 'hidden'}></div>
+                        </div>
+
+                        <div className="glass rounded-2xl p-4">
+                            <p className="text-slate-400 text-sm mb-3 text-center">Or enter tracking manually</p>
+                            <form onSubmit={handleManualSubmit} className="flex gap-2">
+                                <input type="text" value={manualTracking} onChange={(e) => setManualTracking(e.target.value)}
+                                    placeholder="Last 5 digits or full #"
+                                    className="flex-1 bg-slate-800 text-white px-4 py-3 rounded-xl mono text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                                <button type="submit" disabled={isLoading || !manualTracking.trim()}
+                                    className="px-6 py-3 bg-amber-500 text-white rounded-xl font-medium disabled:opacity-50">
+                                    {isLoading ? '...' : 'Go'}
+                                </button>
+                            </form>
+                        </div>
+
+                        {error && <div className="mt-4 p-4 bg-red-500/20 border border-red-500/30 rounded-xl text-red-300 text-sm">{error}</div>}
+                    </div>
+                );
+            }
+
+            if (screen === 'order' && order) {
+                return (
+                    <div className="slide-up">
+                        {alreadyCheckedIn && (
+                            <div className="glass rounded-2xl p-4 mb-4 border-2 border-red-500/50 glow-red fade-in">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center">
+                                        <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <p className="text-red-400 font-semibold">Already Checked In</p>
+                                        <p className="text-slate-400 text-sm">Previously received ({order.fields['Items Received']} items)</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="glass rounded-2xl p-5 mb-4">
+                            <div className="flex items-start justify-between mb-4">
+                                <div>
+                                    <p className="text-slate-400 text-xs mb-1">ORDER</p>
+                                    <p className="text-white font-bold text-lg mono">{order.fields['Order Number']}</p>
+                                </div>
+                                <span className="px-3 py-1 bg-blue-500/20 text-blue-300 rounded-full text-xs font-medium">{order.fields['Status']}</span>
+                            </div>
+                            <div className="border-t border-slate-700 pt-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center">
+                                        <svg className="w-5 h-5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <p className="text-white font-medium">{order.fields['Customer']}</p>
+                                        <p className="text-slate-400 text-sm">Customer</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="glass rounded-2xl p-5 mb-4">
+                            <p className="text-slate-400 text-sm mb-2">Expected Items</p>
+                            <p className="text-4xl font-bold text-white">{order.fields['Package Items Included'] || <span className="text-slate-500">Not set</span>}</p>
+                        </div>
+
+                        <div className="glass rounded-2xl p-5 mb-4 glow-amber">
+                            <label className="text-slate-400 text-sm mb-3 block">Actual Items Received</label>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => setItemCount(Math.max(0, (parseInt(itemCount) || 0) - 1).toString())}
+                                    className="w-12 h-12 flex-shrink-0 rounded-xl bg-slate-700 text-white text-2xl font-bold hover:bg-slate-600 transition-colors">−</button>
+                                <input type="number" value={itemCount} onChange={(e) => setItemCount(e.target.value)} placeholder="0"
+                                    className="flex-1 min-w-0 bg-slate-800 text-white text-center text-3xl font-bold py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 mono" />
+                                <button onClick={() => setItemCount(((parseInt(itemCount) || 0) + 1).toString())}
+                                    className="w-12 h-12 flex-shrink-0 rounded-xl bg-slate-700 text-white text-2xl font-bold hover:bg-slate-600 transition-colors">+</button>
+                            </div>
+                        </div>
+
+                        {getExtraItems() > 0 && (
+                            <div className="glass rounded-2xl p-5 mb-4 border-2 border-amber-500/50 glow-amber fade-in">
+                                <div className="flex items-center gap-3 mb-3">
+                                    <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center">
+                                        <svg className="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <p className="text-amber-400 font-semibold">Extra Items Detected</p>
+                                        <p className="text-slate-400 text-sm">Invoice will be sent</p>
+                                    </div>
+                                </div>
+                                <div className="bg-slate-800/50 rounded-xl p-4">
+                                    <div className="flex justify-between mb-2">
+                                        <span className="text-slate-400">Extra items</span>
+                                        <span className="text-white font-medium">{getExtraItems()}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-400">Charge</span>
+                                        <span className="text-amber-400 font-bold">${(getExtraItems() * CONFIG.EXTRA_ITEM_PRICE).toFixed(2)}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {error && <div className="mb-4 p-4 bg-red-500/20 border border-red-500/30 rounded-xl text-red-300 text-sm">{error}</div>}
+
+                        <div className="flex gap-3">
+                            <button onClick={resetApp} className="flex-1 py-4 bg-slate-700 text-white rounded-xl font-medium hover:bg-slate-600 transition-colors">Cancel</button>
+                            <button onClick={handleSubmit} disabled={isLoading || !itemCount}
+                                className="flex-[2] py-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold disabled:opacity-50">
+                                {isLoading ? 'Saving...' : 'Confirm Check-In'}
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (screen === 'success') {
+                return (
+                    <div className="slide-up text-center">
+                        <div className="glass rounded-2xl p-8 mb-6">
+                            <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center glow-green">
+                                <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                </svg>
+                            </div>
+                            <h2 className="text-2xl font-bold text-white mb-2">Check-In Complete!</h2>
+                            <p className="text-slate-400 mb-4">{order?.fields['Order Number']}</p>
+                            <div className="bg-slate-800/50 rounded-xl p-4 text-left">
+                                <div className="flex justify-between mb-2">
+                                    <span className="text-slate-400">Items received</span>
+                                    <span className="text-white font-medium">{itemCount}</span>
+                                </div>
+                                {getExtraItems() > 0 && (
+                                    <div className="flex justify-between">
+                                        <span className="text-amber-400">Extra items invoice</span>
+                                        <span className="text-amber-400 font-bold">${(getExtraItems() * CONFIG.EXTRA_ITEM_PRICE).toFixed(2)}</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <button onClick={resetApp} className="w-full py-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold">
+                            Scan Next Package
+                        </button>
+                    </div>
+                );
+            }
+
+            return null;
+        }
+
+        // ============================================
+        // MY WORK TAB COMPONENT
+        // ============================================
+        function MyWorkTab({ selectedEmployee, employeeName }) {
+            const [workQueue, setWorkQueue] = useState([]);
+            const [isLoading, setIsLoading] = useState(true);
+            const [error, setError] = useState('');
+            const [selectedOrder, setSelectedOrder] = useState(null);
+            const [itemsDigitized, setItemsDigitized] = useState('');
+            const [isSubmitting, setIsSubmitting] = useState(false);
+
+            const loadWork = async () => {
+                if (!selectedEmployee) return;
+                setIsLoading(true);
+                try {
+                    const data = await ApiService.getMyWork(selectedEmployee);
+                    setWorkQueue(data.orders || []);
+                } catch (err) {
+                    setError('Failed to load work queue');
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            useEffect(() => { loadWork(); }, [selectedEmployee]);
+
+            const handleComplete = async () => {
+                if (!itemsDigitized || parseInt(itemsDigitized) < 0) {
+                    setError('Please enter items digitized');
+                    return;
+                }
+                setIsSubmitting(true);
+                setError('');
+                try {
+                    await ApiService.completeDigitization(selectedOrder.id, parseInt(itemsDigitized), selectedEmployee);
+                    playSuccessFeedback();
+                    setSelectedOrder(null);
+                    setItemsDigitized('');
+                    loadWork();
+                } catch (err) {
+                    setError('Failed to complete order');
+                } finally {
+                    setIsSubmitting(false);
+                }
+            };
+
+            if (!selectedEmployee) {
+                return (
+                    <div className="text-center py-12">
+                        <p className="text-slate-400">Please select your name in Check-In first</p>
+                    </div>
+                );
+            }
+
+            if (selectedOrder) {
+                const pay = CONFIG.BASE_PAY + (parseInt(itemsDigitized) || 0) * CONFIG.PER_ITEM_PAY;
+                return (
+                    <div className="slide-up">
+                        <div className="glass rounded-2xl p-5 mb-4">
+                            <p className="text-slate-400 text-xs mb-1">ORDER</p>
+                            <p className="text-white font-bold text-xl mono mb-2">{selectedOrder.fields['Order Number']}</p>
+                            <p className="text-slate-300">{selectedOrder.fields['Customer']}</p>
+                        </div>
+
+                        <div className="glass rounded-2xl p-5 mb-4">
+                            <p className="text-slate-400 text-sm mb-2">Items Received</p>
+                            <p className="text-3xl font-bold text-white">{selectedOrder.fields['Items Received'] || 0}</p>
+                        </div>
+
+                        <div className="glass rounded-2xl p-5 mb-4 glow-blue">
+                            <label className="text-slate-400 text-sm mb-3 block">Items Digitized</label>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => setItemsDigitized(Math.max(0, (parseInt(itemsDigitized) || 0) - 1).toString())}
+                                    className="w-12 h-12 flex-shrink-0 rounded-xl bg-slate-700 text-white text-2xl font-bold">−</button>
+                                <input type="number" value={itemsDigitized} onChange={(e) => setItemsDigitized(e.target.value)} placeholder="0"
+                                    className="flex-1 min-w-0 bg-slate-800 text-white text-center text-3xl font-bold py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 mono" />
+                                <button onClick={() => setItemsDigitized(((parseInt(itemsDigitized) || 0) + 1).toString())}
+                                    className="w-12 h-12 flex-shrink-0 rounded-xl bg-slate-700 text-white text-2xl font-bold">+</button>
+                            </div>
+                        </div>
+
+                        <div className="glass rounded-2xl p-5 mb-4 border-2 border-green-500/50 glow-green">
+                            <p className="text-slate-400 text-sm mb-3">Estimated Pay</p>
+                            <div className="space-y-2">
+                                <div className="flex justify-between">
+                                    <span className="text-slate-400">Base pay</span>
+                                    <span className="text-white">${CONFIG.BASE_PAY.toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-slate-400">Per item ({itemsDigitized || 0} × ${CONFIG.PER_ITEM_PAY.toFixed(2)})</span>
+                                    <span className="text-white">${((parseInt(itemsDigitized) || 0) * CONFIG.PER_ITEM_PAY).toFixed(2)}</span>
+                                </div>
+                                <div className="border-t border-slate-700 pt-2 flex justify-between">
+                                    <span className="text-green-400 font-semibold">Total</span>
+                                    <span className="text-green-400 font-bold text-xl">${pay.toFixed(2)}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {error && <div className="mb-4 p-4 bg-red-500/20 border border-red-500/30 rounded-xl text-red-300 text-sm">{error}</div>}
+
+                        <div className="flex gap-3">
+                            <button onClick={() => { setSelectedOrder(null); setItemsDigitized(''); setError(''); }}
+                                className="flex-1 py-4 bg-slate-700 text-white rounded-xl font-medium">Cancel</button>
+                            <button onClick={handleComplete} disabled={isSubmitting || !itemsDigitized}
+                                className="flex-[2] py-4 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-bold disabled:opacity-50">
+                                {isSubmitting ? 'Saving...' : 'Mark Complete'}
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
 
             return (
-                <div className="min-h-screen p-4 pb-8 max-w-lg mx-auto overflow-x-hidden">
+                <div className="fade-in">
+                    <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-white font-bold text-lg">My Work Queue</h2>
+                        <button onClick={loadWork} className="text-amber-400 text-sm">Refresh</button>
+                    </div>
+
+                    {isLoading ? (
+                        <div className="text-center py-12">
+                            <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                        </div>
+                    ) : workQueue.length === 0 ? (
+                        <div className="glass rounded-2xl p-8 text-center">
+                            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-700 flex items-center justify-center">
+                                <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                            </div>
+                            <p className="text-slate-400">No orders to digitize</p>
+                            <p className="text-slate-500 text-sm mt-1">Check in some packages first!</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {workQueue.map(order => (
+                                <button key={order.id} onClick={() => { setSelectedOrder(order); setItemsDigitized(order.fields['Items Received']?.toString() || ''); }}
+                                    className="w-full glass rounded-xl p-4 text-left hover:bg-white/5 transition-colors">
+                                    <div className="flex justify-between items-start mb-2">
+                                        <p className="text-white font-semibold mono">{order.fields['Order Number']}</p>
+                                        <span className="px-2 py-1 bg-amber-500/20 text-amber-300 rounded text-xs">{order.fields['Items Received']} items</span>
+                                    </div>
+                                    <p className="text-slate-400 text-sm">{order.fields['Customer']}</p>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ============================================
+        // MY PAY TAB COMPONENT
+        // ============================================
+        function MyPayTab({ selectedEmployee, employeeName }) {
+            const [payData, setPayData] = useState(null);
+            const [isLoading, setIsLoading] = useState(true);
+
+            useEffect(() => {
+                if (!selectedEmployee) return;
+                setIsLoading(true);
+                ApiService.getMyPay(selectedEmployee)
+                    .then(data => setPayData(data))
+                    .catch(() => {})
+                    .finally(() => setIsLoading(false));
+            }, [selectedEmployee]);
+
+            if (!selectedEmployee) {
+                return (
+                    <div className="text-center py-12">
+                        <p className="text-slate-400">Please select your name in Check-In first</p>
+                    </div>
+                );
+            }
+
+            if (isLoading) {
+                return (
+                    <div className="text-center py-12">
+                        <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                    </div>
+                );
+            }
+
+            const currentPeriod = payData?.currentPeriod || {};
+            const stats = payData?.stats || {};
+
+            return (
+                <div className="fade-in">
+                    <div className="glass rounded-2xl p-6 mb-4 glow-green">
+                        <p className="text-slate-400 text-sm mb-1">Current Period Earnings</p>
+                        <p className="text-4xl font-bold text-green-400">${(currentPeriod.totalEarnings || 0).toFixed(2)}</p>
+                        <p className="text-slate-500 text-sm mt-2">{currentPeriod.name || 'Current Period'}</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                        <div className="glass rounded-xl p-4">
+                            <p className="text-slate-400 text-xs mb-1">Orders Completed</p>
+                            <p className="text-2xl font-bold text-white">{stats.ordersCompleted || 0}</p>
+                        </div>
+                        <div className="glass rounded-xl p-4">
+                            <p className="text-slate-400 text-xs mb-1">Items Digitized</p>
+                            <p className="text-2xl font-bold text-white">{stats.itemsDigitized || 0}</p>
+                        </div>
+                    </div>
+
+                    <div className="glass rounded-2xl p-5 mb-4">
+                        <p className="text-slate-400 text-sm mb-3">Pay Breakdown</p>
+                        <div className="space-y-2">
+                            <div className="flex justify-between">
+                                <span className="text-slate-400">Base pay ({stats.ordersCompleted || 0} orders)</span>
+                                <span className="text-white">${((stats.ordersCompleted || 0) * CONFIG.BASE_PAY).toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-slate-400">Per item pay ({stats.itemsDigitized || 0} items)</span>
+                                <span className="text-white">${((stats.itemsDigitized || 0) * CONFIG.PER_ITEM_PAY).toFixed(2)}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {payData?.recentOrders?.length > 0 && (
+                        <div className="glass rounded-2xl p-5">
+                            <p className="text-slate-400 text-sm mb-3">Recent Completed Orders</p>
+                            <div className="space-y-2">
+                                {payData.recentOrders.map(order => (
+                                    <div key={order.id} className="flex justify-between py-2 border-b border-slate-700 last:border-0">
+                                        <div>
+                                            <p className="text-white text-sm mono">{order.orderNumber}</p>
+                                            <p className="text-slate-500 text-xs">{order.itemsDigitized} items</p>
+                                        </div>
+                                        <p className="text-green-400 font-medium">${order.pay?.toFixed(2)}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ============================================
+        // MAIN APP
+        // ============================================
+        function App() {
+            const [activeTab, setActiveTab] = useState('checkin');
+            const [employees, setEmployees] = useState([]);
+            const [selectedEmployee, setSelectedEmployee] = useState(() => localStorage.getItem('heritagebox_employee') || '');
+            const [isLoading, setIsLoading] = useState(true);
+
+            useEffect(() => {
+                ApiService.getEmployees()
+                    .then(data => {
+                        const empList = data.employees || [];
+                        setEmployees(empList);
+                        if (!selectedEmployee && empList.length > 0) {
+                            const ericMade = empList.find(e => e.name === 'Eric Made');
+                            if (ericMade) setSelectedEmployee(ericMade.id);
+                        }
+                    })
+                    .catch(() => {})
+                    .finally(() => setIsLoading(false));
+            }, []);
+
+            useEffect(() => {
+                if (selectedEmployee) localStorage.setItem('heritagebox_employee', selectedEmployee);
+            }, [selectedEmployee]);
+
+            const employeeName = employees.find(e => e.id === selectedEmployee)?.name || '';
+
+            if (isLoading) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center">
+                        <div className="w-10 h-10 border-3 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen max-w-lg mx-auto">
                     {/* Header */}
-                    <header className="text-center mb-6 pt-2">
+                    <header className="text-center p-4 pt-6">
                         <div className="flex items-center justify-center gap-2 mb-1">
                             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
                                 <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -378,298 +718,42 @@
                             </div>
                             <h1 className="text-xl font-bold text-white">HeritageBox</h1>
                         </div>
-                        <p className="text-slate-400 text-sm">Package Check-In</p>
+                        {employeeName && <p className="text-amber-400 text-sm">{employeeName}</p>}
                     </header>
 
-                    {/* Employee Selector */}
-                    <div className="glass rounded-xl p-3 mb-4">
-                        <label className="text-slate-400 text-xs mb-2 block">Checked in by</label>
-                        <select
-                            value={selectedEmployee}
-                            onChange={(e) => setSelectedEmployee(e.target.value)}
-                            className="w-full bg-slate-800 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm"
-                        >
-                            <option value="">Select your name...</option>
-                            {employees.map(emp => (
-                                <option key={emp.id} value={emp.id}>{emp.name}</option>
-                            ))}
-                        </select>
-                    </div>
+                    {/* Content */}
+                    <main className="px-4 pb-24">
+                        {activeTab === 'checkin' && <CheckInTab selectedEmployee={selectedEmployee} employees={employees} setSelectedEmployee={setSelectedEmployee} />}
+                        {activeTab === 'work' && <MyWorkTab selectedEmployee={selectedEmployee} employeeName={employeeName} />}
+                        {activeTab === 'pay' && <MyPayTab selectedEmployee={selectedEmployee} employeeName={employeeName} />}
+                    </main>
 
-                    {/* Scan Screen */}
-                    {screen === 'scan' && (
-                        <div className="fade-in">
-                            {/* Scanner Area */}
-                            <div className="glass rounded-2xl p-4 mb-4">
-                                {isScanning ? (
-                                    <div>
-                                        <div id="reader" className="rounded-xl overflow-hidden mb-3"></div>
-                                        <button
-                                            onClick={stopScanner}
-                                            className="w-full py-3 bg-slate-700 text-white rounded-xl font-medium"
-                                        >
-                                            Cancel Scan
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <button
-                                        onClick={startScanner}
-                                        disabled={isLoading}
-                                        className="w-full py-16 border-2 border-dashed border-slate-600 rounded-xl flex flex-col items-center gap-3 hover:border-amber-500 transition-colors scan-pulse"
-                                    >
-                                        <div className="w-16 h-16 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
-                                            <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-                                            </svg>
-                                        </div>
-                                        <span className="text-white font-medium">Tap to Scan Barcode</span>
-                                        <span className="text-slate-400 text-sm">Scan UPS tracking number</span>
-                                    </button>
-                                )}
-                                <div id="reader" className={isScanning ? '' : 'hidden'}></div>
-                            </div>
-
-                            {/* Manual Entry */}
-                            <div className="glass rounded-2xl p-4">
-                                <p className="text-slate-400 text-sm mb-3 text-center">Or enter tracking manually</p>
-                                <form onSubmit={handleManualSubmit} className="flex gap-2">
-                                    <input
-                                        type="text"
-                                        value={manualTracking}
-                                        onChange={(e) => setManualTracking(e.target.value)}
-                                        placeholder="Last 5 digits or full #"
-                                        className="flex-1 bg-slate-800 text-white px-4 py-3 rounded-xl mono text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                                    />
-                                    <button
-                                        type="submit"
-                                        disabled={isLoading || !manualTracking.trim()}
-                                        className="px-6 py-3 bg-amber-500 text-white rounded-xl font-medium disabled:opacity-50"
-                                    >
-                                        {isLoading ? '...' : 'Go'}
-                                    </button>
-                                </form>
-                            </div>
-
-                            {/* Error Message */}
-                            {error && (
-                                <div className="mt-4 p-4 bg-red-500/20 border border-red-500/30 rounded-xl text-red-300 text-sm">
-                                    {error}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Order Screen */}
-                    {screen === 'order' && order && (
-                        <div className="slide-up">
-                            {/* Already Checked In Warning */}
-                            {alreadyCheckedIn && (
-                                <div className="glass rounded-2xl p-4 mb-4 border-2 border-red-500/50 glow-red fade-in">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center">
-                                            <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                            </svg>
-                                        </div>
-                                        <div>
-                                            <p className="text-red-400 font-semibold">Already Checked In</p>
-                                            <p className="text-slate-400 text-sm">This order was previously received ({order.fields['Items Received']} items)</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Order Info Card */}
-                            <div className="glass rounded-2xl p-5 mb-4">
-                                <div className="flex items-start justify-between mb-4">
-                                    <div>
-                                        <p className="text-slate-400 text-xs mb-1">ORDER</p>
-                                        <p className="text-white font-bold text-lg mono">{order.fields['Order Number']}</p>
-                                    </div>
-                                    <span className="px-3 py-1 bg-blue-500/20 text-blue-300 rounded-full text-xs font-medium">
-                                        {order.fields['Status']}
-                                    </span>
-                                </div>
-                                
-                                <div className="border-t border-slate-700 pt-4">
-                                    <div className="flex items-center gap-3 mb-3">
-                                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center">
-                                            <svg className="w-5 h-5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                            </svg>
-                                        </div>
-                                        <div>
-                                            <p className="text-white font-medium">{order.fields['Customer']}</p>
-                                            <p className="text-slate-400 text-sm">Customer</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Expected Items */}
-                            <div className="glass rounded-2xl p-5 mb-4">
-                                <p className="text-slate-400 text-sm mb-2">Expected Items in Package</p>
-                                <p className="text-4xl font-bold text-white">
-                                    {order.fields['Package Items Included'] || <span className="text-slate-500">Not set</span>}
-                                </p>
-                            </div>
-
-                            {/* Item Count Input */}
-                            <div className="glass rounded-2xl p-5 mb-4 glow-amber">
-                                <label className="text-slate-400 text-sm mb-3 block">Actual Items Received</label>
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={() => setItemCount(Math.max(0, (parseInt(itemCount) || 0) - 1).toString())}
-                                        className="w-12 h-12 flex-shrink-0 rounded-xl bg-slate-700 text-white text-2xl font-bold hover:bg-slate-600 transition-colors"
-                                    >
-                                        −
-                                    </button>
-                                    <input
-                                        type="number"
-                                        value={itemCount}
-                                        onChange={(e) => setItemCount(e.target.value)}
-                                        placeholder="0"
-                                        className="flex-1 min-w-0 bg-slate-800 text-white text-center text-3xl font-bold py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 mono"
-                                    />
-                                    <button
-                                        onClick={() => setItemCount(((parseInt(itemCount) || 0) + 1).toString())}
-                                        className="w-12 h-12 flex-shrink-0 rounded-xl bg-slate-700 text-white text-2xl font-bold hover:bg-slate-600 transition-colors"
-                                    >
-                                        +
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Extra Items Warning */}
-                            {getExtraItems() > 0 && (
-                                <div className="glass rounded-2xl p-5 mb-4 border-2 border-amber-500/50 glow-amber fade-in">
-                                    <div className="flex items-center gap-3 mb-3">
-                                        <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center">
-                                            <svg className="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                            </svg>
-                                        </div>
-                                        <div>
-                                            <p className="text-amber-400 font-semibold">Extra Items Detected</p>
-                                            <p className="text-slate-400 text-sm">Invoice will be sent automatically</p>
-                                        </div>
-                                    </div>
-                                    <div className="bg-slate-800/50 rounded-xl p-4">
-                                        <div className="flex justify-between mb-2">
-                                            <span className="text-slate-400">Extra items</span>
-                                            <span className="text-white font-medium">{getExtraItems()}</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                            <span className="text-slate-400">Charge (${CONFIG.EXTRA_ITEM_PRICE}/item)</span>
-                                            <span className="text-amber-400 font-bold">${(getExtraItems() * CONFIG.EXTRA_ITEM_PRICE).toFixed(2)}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Match indicator */}
-                            {itemCount && getExtraItems() === 0 && parseInt(itemCount) === (order.fields['Package Items Included'] || 0) && (
-                                <div className="glass rounded-2xl p-4 mb-4 border-2 border-green-500/50 glow-green fade-in">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
-                                            <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                        </div>
-                                        <p className="text-green-400 font-medium">Count matches expected!</p>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Error Message */}
-                            {error && (
-                                <div className="mb-4 p-4 bg-red-500/20 border border-red-500/30 rounded-xl text-red-300 text-sm">
-                                    {error}
-                                </div>
-                            )}
-
-                            {/* Action Buttons */}
-                            <div className="flex gap-3">
-                                <button
-                                    onClick={resetApp}
-                                    className="flex-1 py-4 bg-slate-700 text-white rounded-xl font-medium hover:bg-slate-600 transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={handleSubmit}
-                                    disabled={isLoading || !itemCount}
-                                    className="flex-[2] py-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold disabled:opacity-50 transition-opacity"
-                                >
-                                    {isLoading ? 'Saving...' : 'Confirm Check-In'}
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Success Screen */}
-                    {screen === 'success' && (
-                        <div className="slide-up text-center">
-                            <div className="glass rounded-2xl p-8 mb-6">
-                                <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center glow-green">
-                                    <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                    </svg>
-                                </div>
-                                <h2 className="text-2xl font-bold text-white mb-2">Check-In Complete!</h2>
-                                <p className="text-slate-400 mb-6">
-                                    Order {order?.fields['Order Number']} has been updated.
-                                </p>
-                                
-                                <div className="bg-slate-800/50 rounded-xl p-4 text-left mb-6">
-                                    <div className="flex justify-between mb-2">
-                                        <span className="text-slate-400">Items received</span>
-                                        <span className="text-white font-medium">{itemCount}</span>
-                                    </div>
-                                    <div className="flex justify-between mb-2">
-                                        <span className="text-slate-400">Expected</span>
-                                        <span className="text-white font-medium">{order?.fields['Package Items Included'] || 'N/A'}</span>
-                                    </div>
-                                    {getExtraItems() > 0 && (
-                                        <>
-                                            <div className="border-t border-slate-700 my-3"></div>
-                                            <div className="flex justify-between mb-2">
-                                                <span className="text-amber-400">Extra items</span>
-                                                <span className="text-amber-400 font-medium">+{getExtraItems()}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="text-amber-400">Invoice amount</span>
-                                                <span className="text-amber-400 font-bold">${(getExtraItems() * CONFIG.EXTRA_ITEM_PRICE).toFixed(2)}</span>
-                                            </div>
-                                        </>
-                                    )}
-                                </div>
-
-                                {invoiceResult && (
-                                    <div className="bg-amber-500/20 border border-amber-500/30 rounded-xl p-4 mb-6">
-                                        <p className="text-amber-300 text-sm">
-                                            📧 Invoice sent to customer
-                                            {useDemo && <span className="block text-xs mt-1 text-amber-400/70">(Demo mode - no actual invoice sent)</span>}
-                                        </p>
-                                    </div>
-                                )}
-                            </div>
-
-                            <button
-                                onClick={resetApp}
-                                className="w-full py-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold"
-                            >
-                                Scan Next Package
+                    {/* Bottom Tabs */}
+                    <nav className="fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur border-t border-slate-800">
+                        <div className="max-w-lg mx-auto flex">
+                            <button onClick={() => setActiveTab('checkin')}
+                                className={`flex-1 py-4 flex flex-col items-center gap-1 ${activeTab === 'checkin' ? 'text-amber-400' : 'text-slate-500'}`}>
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                                </svg>
+                                <span className="text-xs font-medium">Check-In</span>
+                            </button>
+                            <button onClick={() => setActiveTab('work')}
+                                className={`flex-1 py-4 flex flex-col items-center gap-1 ${activeTab === 'work' ? 'text-amber-400' : 'text-slate-500'}`}>
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                                </svg>
+                                <span className="text-xs font-medium">My Work</span>
+                            </button>
+                            <button onClick={() => setActiveTab('pay')}
+                                className={`flex-1 py-4 flex flex-col items-center gap-1 ${activeTab === 'pay' ? 'text-amber-400' : 'text-slate-500'}`}>
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <span className="text-xs font-medium">My Pay</span>
                             </button>
                         </div>
-                    )}
-
-                    {/* Loading Overlay */}
-                    {isLoading && (
-                        <div className="fixed inset-0 bg-slate-900/80 flex items-center justify-center z-50">
-                            <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-                        </div>
-                    )}
+                    </nav>
                 </div>
             );
         }

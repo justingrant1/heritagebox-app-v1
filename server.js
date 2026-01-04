@@ -1,12 +1,13 @@
 /**
- * HeritageBox Check-In Backend Server
+ * HeritageBox Employee App Backend Server
  * 
  * This server handles:
- * 1. Secure Airtable API calls
- * 2. Stripe invoice creation
- * 3. Webhook handling for payment status
+ * 1. Package check-in with Airtable
+ * 2. Stripe invoice creation for extra items
+ * 3. Employee work queue management
+ * 4. Pay tracking and calculations
  * 
- * Deploy this to: Vercel, Railway, Render, or any Node.js host
+ * Deploy to: Render, Railway, Vercel, or any Node.js host
  */
 
 const express = require('express');
@@ -26,11 +27,15 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const airtable = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY });
 const base = airtable.base(process.env.AIRTABLE_BASE_ID);
 
-const EXTRA_ITEM_PRICE = 15.00; // $15 per extra item
+const EXTRA_ITEM_PRICE = 15.00;
+const BASE_PAY = 7.50;
+const PER_ITEM_PAY = 2.00;
 const ORDERS_TABLE = 'Orders';
+const EMPLOYEES_TABLE = 'Employees';
+const PAY_PERIODS_TABLE = 'Pay_Periods';
 
 // ============================================
-// ROUTES
+// EMPLOYEE ROUTES
 // ============================================
 
 /**
@@ -39,13 +44,11 @@ const ORDERS_TABLE = 'Orders';
  */
 app.get('/api/employees', async (req, res) => {
     try {
-        // Get all employees (filter Active in code to handle empty values)
-        const records = await base('Employees').select({
+        const records = await base(EMPLOYEES_TABLE).select({
             fields: ['Employee Name', 'Active'],
             sort: [{ field: 'Employee Name', direction: 'asc' }]
         }).firstPage();
         
-        // Filter for active employees (Active = true or field doesn't exist)
         const employees = records
             .filter(r => r.fields['Active'] === true || r.fields['Active'] === undefined)
             .map(r => ({
@@ -61,6 +64,125 @@ app.get('/api/employees', async (req, res) => {
 });
 
 /**
+ * Get employee's work queue (orders to digitize)
+ * GET /api/employees/:employeeId/work
+ */
+app.get('/api/employees/:employeeId/work', async (req, res) => {
+    try {
+        const { employeeId } = req.params;
+        
+        // Get orders assigned to this employee that are NOT Complete
+        const records = await base(ORDERS_TABLE).select({
+            filterByFormula: `AND({Status}!='Complete', FIND('${employeeId}', ARRAYJOIN({Assigned Employee})))`,
+            fields: ['Order Number', 'Customer', 'Customer Name', 'Items Received', 'Status', 'Package Items Included'],
+            sort: [{ field: 'Created Time', direction: 'asc' }]
+        }).firstPage();
+        
+        const orders = records.map(r => {
+            let customerName = r.fields['Customer Name'] || r.fields['Customer'];
+            if (Array.isArray(customerName)) customerName = customerName[0];
+            
+            return {
+                id: r.id,
+                fields: {
+                    'Order Number': r.fields['Order Number'],
+                    'Customer': customerName,
+                    'Items Received': r.fields['Items Received'],
+                    'Status': r.fields['Status'],
+                    'Package Items Included': r.fields['Package Items Included']
+                }
+            };
+        });
+        
+        res.json({ orders });
+    } catch (error) {
+        console.error('Error fetching work queue:', error.message);
+        res.status(500).json({ error: 'Failed to fetch work queue' });
+    }
+});
+
+/**
+ * Get employee's pay information
+ * GET /api/employees/:employeeId/pay
+ */
+app.get('/api/employees/:employeeId/pay', async (req, res) => {
+    try {
+        const { employeeId } = req.params;
+        
+        // Get completed orders for this employee
+        const completedOrders = await base(ORDERS_TABLE).select({
+            filterByFormula: `AND({Digitization Complete}=TRUE(), FIND('${employeeId}', ARRAYJOIN({Employee Link})))`,
+            fields: ['Order Number', 'Items Digitized', 'Base Pay', 'Per Item Pay', 'Total Order Pay', 'Digitization Completion Date'],
+            sort: [{ field: 'Digitization Completion Date', direction: 'desc' }]
+        }).firstPage();
+        
+        // Calculate stats
+        let totalEarnings = 0;
+        let totalOrders = 0;
+        let totalItems = 0;
+        
+        const recentOrders = completedOrders.slice(0, 5).map(r => {
+            const itemsDigitized = r.fields['Items Digitized'] || 0;
+            const pay = (r.fields['Total Order Pay'] || 0);
+            totalEarnings += pay;
+            totalOrders++;
+            totalItems += itemsDigitized;
+            
+            return {
+                id: r.id,
+                orderNumber: r.fields['Order Number'],
+                itemsDigitized,
+                pay,
+                date: r.fields['Digitization Completion Date']
+            };
+        });
+        
+        // Calculate totals from all orders
+        completedOrders.slice(5).forEach(r => {
+            totalEarnings += (r.fields['Total Order Pay'] || 0);
+            totalOrders++;
+            totalItems += (r.fields['Items Digitized'] || 0);
+        });
+        
+        // Get current pay period
+        let currentPeriod = { name: 'Current Period', totalEarnings: 0 };
+        try {
+            const periods = await base(PAY_PERIODS_TABLE).select({
+                filterByFormula: `{Status}!='Paid'`,
+                sort: [{ field: 'Start Date', direction: 'desc' }],
+                maxRecords: 1
+            }).firstPage();
+            
+            if (periods.length > 0) {
+                currentPeriod.name = periods[0].fields['Pay Period Name'] || 'Current Period';
+            }
+        } catch (e) {
+            console.log('Could not fetch pay periods:', e.message);
+        }
+        
+        // Calculate current period earnings (simplified - all unpaid orders)
+        currentPeriod.totalEarnings = totalEarnings;
+        
+        res.json({
+            currentPeriod,
+            stats: {
+                ordersCompleted: totalOrders,
+                itemsDigitized: totalItems,
+                totalEarnings
+            },
+            recentOrders
+        });
+    } catch (error) {
+        console.error('Error fetching pay info:', error.message);
+        res.status(500).json({ error: 'Failed to fetch pay info' });
+    }
+});
+
+// ============================================
+// ORDER ROUTES
+// ============================================
+
+/**
  * Look up order by tracking number (full or last 5 digits)
  * GET /api/orders/tracking/:trackingNumber
  */
@@ -71,8 +193,6 @@ app.get('/api/orders/tracking/:trackingNumber', async (req, res) => {
         console.log(`Looking up tracking number: ${trackingNumber}`);
         
         let formula;
-        
-        // If 5 or fewer characters, search by last digits using RIGHT() function
         if (trackingNumber.length <= 5) {
             formula = `OR(
                 RIGHT({Label 1 Tracking}, ${trackingNumber.length})='${trackingNumber}',
@@ -80,84 +200,54 @@ app.get('/api/orders/tracking/:trackingNumber', async (req, res) => {
                 RIGHT({Label 3 Tracking}, ${trackingNumber.length})='${trackingNumber}'
             )`;
         } else {
-            // Full tracking number - exact match
             formula = `OR({Label 1 Tracking}='${trackingNumber}',{Label 2 Tracking}='${trackingNumber}',{Label 3 Tracking}='${trackingNumber}')`;
         }
         
-        console.log(`Using formula: ${formula}`);
-        
         const records = await base(ORDERS_TABLE).select({
             filterByFormula: formula,
-            maxRecords: 10 // Get more in case of duplicates
+            maxRecords: 10
         }).firstPage();
-        
-        console.log(`Found ${records.length} records`);
         
         if (records.length === 0) {
             return res.status(404).json({ error: 'Order not found', trackingNumber });
         }
         
-        // If multiple matches, return error with options
         if (records.length > 1) {
             const matches = records.map(r => ({
                 orderNumber: r.fields['Order Number'],
-                customer: r.fields['Customer Name'] || r.fields['Customer'],
-                tracking1: r.fields['Label 1 Tracking'],
-                tracking2: r.fields['Label 2 Tracking'],
-                tracking3: r.fields['Label 3 Tracking']
+                customer: r.fields['Customer Name'] || r.fields['Customer']
             }));
-            return res.status(400).json({ 
-                error: 'Multiple orders match. Use more digits.', 
-                matches 
-            });
+            return res.status(400).json({ error: 'Multiple orders match. Use more digits.', matches });
         }
         
         const record = records[0];
-        console.log(`Found order: ${record.fields['Order Number']}`);
         
-        // Handle linked Customer field - fetch the actual customer name
+        // Handle linked Customer field
         let customerName = record.fields['Customer'];
-        
-        // If Customer is a linked record (array of IDs), fetch the name
         if (Array.isArray(customerName) && customerName.length > 0) {
-            try {
-                // Try to use Customer Name lookup field first
-                if (record.fields['Customer Name']) {
-                    customerName = Array.isArray(record.fields['Customer Name']) 
-                        ? record.fields['Customer Name'][0] 
-                        : record.fields['Customer Name'];
-                } else {
-                    // Fallback: fetch from Customers table
-                    const customerRecord = await base('Customers').find(customerName[0]);
-                    customerName = customerRecord.fields['Name'] || customerRecord.fields['Customer Name'] || 'Unknown';
-                }
-            } catch (e) {
-                console.log('Could not fetch customer name:', e.message);
-                customerName = 'Customer';
+            if (record.fields['Customer Name']) {
+                customerName = Array.isArray(record.fields['Customer Name']) 
+                    ? record.fields['Customer Name'][0] 
+                    : record.fields['Customer Name'];
             }
         }
         
-        // Build response with cleaned up customer name
-        const responseFields = {
-            ...record.fields,
-            'Customer': customerName
-        };
-        
         res.json({
             id: record.id,
-            fields: responseFields
+            fields: {
+                ...record.fields,
+                'Customer': customerName
+            }
         });
     } catch (error) {
         console.error('Error looking up order:', error.message);
-        console.error('Full error:', error);
         res.status(500).json({ error: 'Failed to lookup order', details: error.message });
     }
 });
 
 /**
- * Check in a package and create invoice if needed
+ * Check in a package
  * POST /api/orders/:recordId/checkin
- * Body: { itemsReceived: number, employeeId: string }
  */
 app.post('/api/orders/:recordId/checkin', async (req, res) => {
     try {
@@ -166,46 +256,28 @@ app.post('/api/orders/:recordId/checkin', async (req, res) => {
         
         console.log(`Checking in order ${recordId} with ${itemsReceived} items by employee ${employeeId}`);
         
-        // Get current order
         const order = await base(ORDERS_TABLE).find(recordId);
         const expectedItems = order.fields['Package Items Included'] || 0;
         const extraItems = Math.max(0, itemsReceived - expectedItems);
         const extraCharge = extraItems * EXTRA_ITEM_PRICE;
-        
-        console.log(`Expected: ${expectedItems}, Received: ${itemsReceived}, Extra: ${extraItems}`);
         
         let invoiceId = null;
         let invoiceUrl = null;
         
         // Create Stripe invoice if there are extra items
         if (extraItems > 0) {
-            // Handle Customer Email - might be array from lookup field
             let customerEmail = order.fields['Customer Email'];
-            if (Array.isArray(customerEmail)) {
-                customerEmail = customerEmail[0];
-            }
+            if (Array.isArray(customerEmail)) customerEmail = customerEmail[0];
             
-            // Handle Customer Name - might be array from linked field
             let customerName = order.fields['Customer Name'] || order.fields['Customer'];
-            if (Array.isArray(customerName)) {
-                customerName = customerName[0];
-            }
+            if (Array.isArray(customerName)) customerName = customerName[0];
             
             const orderNumber = order.fields['Order Number'];
             
-            console.log(`Creating invoice for ${customerEmail}, order ${orderNumber}`);
-            
-            if (!customerEmail) {
-                console.error('No customer email found for order');
-                // Continue without invoice - don't fail the whole check-in
-            } else {
+            if (customerEmail) {
                 try {
-                    // Find or create Stripe customer
                     let customer;
-                    const existingCustomers = await stripe.customers.list({
-                        email: customerEmail,
-                        limit: 1
-                    });
+                    const existingCustomers = await stripe.customers.list({ email: customerEmail, limit: 1 });
                     
                     if (existingCustomers.data.length > 0) {
                         customer = existingCustomers.data[0];
@@ -213,43 +285,32 @@ app.post('/api/orders/:recordId/checkin', async (req, res) => {
                         customer = await stripe.customers.create({
                             email: customerEmail,
                             name: customerName || 'Customer',
-                            metadata: {
-                                airtable_order: orderNumber
-                            }
+                            metadata: { airtable_order: orderNumber }
                         });
                     }
                     
-                    // Create invoice
                     const invoice = await stripe.invoices.create({
                         customer: customer.id,
                         collection_method: 'send_invoice',
                         days_until_due: 7,
-                        metadata: {
-                            order_number: orderNumber,
-                            extra_items: extraItems.toString()
-                        }
+                        metadata: { order_number: orderNumber, extra_items: extraItems.toString() }
                     });
                     
-                    // Add line item
                     await stripe.invoiceItems.create({
                         customer: customer.id,
                         invoice: invoice.id,
-                        amount: Math.round(extraCharge * 100), // Stripe uses cents
+                        amount: Math.round(extraCharge * 100),
                         currency: 'usd',
                         description: `Additional digitization items (${extraItems} items @ $${EXTRA_ITEM_PRICE}/each) - Order ${orderNumber}`
                     });
                     
-                    // Finalize and send
                     const finalizedInvoice = await stripe.invoices.finalizeInvoice(invoice.id);
                     await stripe.invoices.sendInvoice(finalizedInvoice.id);
                     
                     invoiceId = finalizedInvoice.id;
                     invoiceUrl = finalizedInvoice.hosted_invoice_url;
-                    
-                    console.log(`Invoice created: ${invoiceId}`);
                 } catch (stripeError) {
                     console.error('Stripe error:', stripeError.message);
-                    // Continue without invoice - don't fail the whole check-in
                 }
             }
         }
@@ -266,55 +327,83 @@ app.post('/api/orders/:recordId/checkin', async (req, res) => {
         
         const updatedRecord = await base(ORDERS_TABLE).update(recordId, updateFields);
         
-        console.log(`Order ${recordId} updated successfully`);
-        
         res.json({
             success: true,
-            order: {
-                id: updatedRecord.id,
-                fields: updatedRecord.fields
-            },
-            invoice: invoiceId ? {
-                id: invoiceId,
-                url: invoiceUrl,
-                amount: extraCharge
-            } : null
+            order: { id: updatedRecord.id, fields: updatedRecord.fields },
+            invoice: invoiceId ? { id: invoiceId, url: invoiceUrl, amount: extraCharge } : null
         });
         
     } catch (error) {
         console.error('Error checking in order:', error.message);
-        console.error('Full error:', error);
         res.status(500).json({ error: 'Failed to check in order', details: error.message });
     }
 });
 
 /**
- * Stripe webhook handler for payment events
- * POST /api/webhooks/stripe
+ * Complete digitization of an order
+ * POST /api/orders/:recordId/complete
  */
+app.post('/api/orders/:recordId/complete', async (req, res) => {
+    try {
+        const { recordId } = req.params;
+        const { itemsDigitized, employeeId } = req.body;
+        
+        console.log(`Completing order ${recordId} with ${itemsDigitized} items digitized by ${employeeId}`);
+        
+        // Calculate pay
+        const basePay = BASE_PAY;
+        const perItemPay = itemsDigitized * PER_ITEM_PAY;
+        const totalPay = basePay + perItemPay;
+        
+        // Update order
+        const updateFields = {
+            'Items Digitized': itemsDigitized,
+            'Digitization Complete': true,
+            'Digitization Completion Date': new Date().toISOString().split('T')[0],
+            'Status': 'Complete',
+            'Base Pay': basePay,
+            'Per Item Pay': perItemPay,
+            'Total Order Pay': totalPay,
+            ...(employeeId && { 'Employee Link': [employeeId] })
+        };
+        
+        const updatedRecord = await base(ORDERS_TABLE).update(recordId, updateFields);
+        
+        console.log(`Order ${recordId} completed. Pay: $${totalPay}`);
+        
+        res.json({
+            success: true,
+            order: { id: updatedRecord.id, fields: updatedRecord.fields },
+            pay: { basePay, perItemPay, totalPay }
+        });
+        
+    } catch (error) {
+        console.error('Error completing order:', error.message);
+        res.status(500).json({ error: 'Failed to complete order', details: error.message });
+    }
+});
+
+// ============================================
+// STRIPE WEBHOOK
+// ============================================
+
 app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
     
     try {
-        event = stripe.webhooks.constructEvent(
-            req.body,
-            sig,
-            process.env.STRIPE_WEBHOOK_SECRET
-        );
+        event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
     } catch (err) {
         console.error('Webhook signature verification failed:', err.message);
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
     
-    // Handle invoice payment
     if (event.type === 'invoice.paid') {
         const invoice = event.data.object;
         const orderNumber = invoice.metadata?.order_number;
         
         if (orderNumber) {
             try {
-                // Find and update order in Airtable
                 const records = await base(ORDERS_TABLE).select({
                     filterByFormula: `{Order Number}='${orderNumber}'`,
                     maxRecords: 1
@@ -325,7 +414,6 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
                         'Extra Items Paid': true,
                         'Extra Items Payment Date': new Date().toISOString().split('T')[0]
                     });
-                    console.log(`Updated payment status for order ${orderNumber}`);
                 }
             } catch (error) {
                 console.error('Error updating payment status:', error);
@@ -336,34 +424,10 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
     res.json({ received: true });
 });
 
-/**
- * Get invoice payment status
- * GET /api/invoices/:invoiceId/status
- */
-app.get('/api/invoices/:invoiceId/status', async (req, res) => {
-    try {
-        const { invoiceId } = req.params;
-        const invoice = await stripe.invoices.retrieve(invoiceId);
-        
-        res.json({
-            id: invoice.id,
-            status: invoice.status,
-            paid: invoice.paid,
-            amount_due: invoice.amount_due / 100,
-            amount_paid: invoice.amount_paid / 100,
-            hosted_invoice_url: invoice.hosted_invoice_url,
-            created: new Date(invoice.created * 1000).toISOString()
-        });
-    } catch (error) {
-        console.error('Error fetching invoice:', error);
-        res.status(500).json({ error: 'Failed to fetch invoice status' });
-    }
-});
+// ============================================
+// UTILITY ROUTES
+// ============================================
 
-/**
- * Health check
- * GET /api/health
- */
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
@@ -373,7 +437,7 @@ app.get('/api/health', (req, res) => {
 // ============================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`HeritageBox Check-In API running on port ${PORT}`);
+    console.log(`HeritageBox API running on port ${PORT}`);
 });
 
 module.exports = app;
