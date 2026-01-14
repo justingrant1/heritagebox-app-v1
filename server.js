@@ -77,7 +77,7 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
         // Get all non-complete orders and filter in code for more reliable matching
         const records = await base(ORDERS_TABLE).select({
             filterByFormula: `{Status}!='Complete'`,
-            fields: ['Order Number', 'Customer', 'Customer Name', 'Items Received', 'Status', 'Package Items Included', 'Assigned Employee', 'Check-In Notes'],
+            fields: ['Order Number', 'Customer', 'Customer Name', 'Customer Email', 'Items Received', 'Status', 'Package Items Included', 'Assigned Employee', 'Check-In Notes'],
             sort: [{ field: 'Created Time', direction: 'asc' }]
         }).firstPage();
         
@@ -111,11 +111,15 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
             let customerName = r.fields['Customer Name'] || r.fields['Customer'];
             if (Array.isArray(customerName)) customerName = customerName[0];
             
+            let customerEmail = r.fields['Customer Email'];
+            if (Array.isArray(customerEmail)) customerEmail = customerEmail[0];
+            
             return {
                 id: r.id,
                 fields: {
                     'Order Number': r.fields['Order Number'],
                     'Customer': customerName,
+                    'Customer Email': customerEmail || '',
                     'Items Received': r.fields['Items Received'],
                     'Status': r.fields['Status'],
                     'Package Items Included': r.fields['Package Items Included'],

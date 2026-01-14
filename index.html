@@ -547,6 +547,9 @@
                             <p className="text-slate-400 text-xs mb-1">ORDER</p>
                             <p className="text-white font-bold text-xl mono mb-2">{selectedOrder.fields['Order Number']}</p>
                             <p className="text-slate-300">{selectedOrder.fields['Customer']}</p>
+                            {selectedOrder.fields['Customer Email'] && (
+                                <p className="text-slate-400 text-sm mt-1">✉️ {selectedOrder.fields['Customer Email']}</p>
+                            )}
                         </div>
 
                         <div className="glass rounded-2xl p-5 mb-4">
