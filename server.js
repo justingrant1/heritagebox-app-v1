@@ -76,8 +76,8 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
         
         // Get all non-complete orders and filter in code for more reliable matching
         const records = await base(ORDERS_TABLE).select({
-            filterByFormula: `{Status}!='Complete'`,
-            fields: ['Order Number', 'Customer', 'Customer Name', 'Customer Email', 'Items Received', 'Status', 'Package Items Included', 'Assigned Employee', 'Check-In Notes'],
+            filterByFormula: `{Ops Status}!='Complete'`,
+            fields: ['Order Number', 'Customer', 'Customer Name', 'Customer Email', 'Items Received', 'Ops Status', 'Package Items Included', 'Assigned Employee', 'Check-In Notes'],
             sort: [{ field: 'Created Time', direction: 'asc' }]
         }).firstPage();
         
@@ -107,12 +107,35 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
         
         console.log(`Found ${filteredRecords.length} orders assigned to employee`);
         
-        const orders = filteredRecords.map(r => {
+        // Process orders and fetch USB drive counts
+        const orders = await Promise.all(filteredRecords.map(async (r) => {
             let customerName = r.fields['Customer Name'] || r.fields['Customer'];
             if (Array.isArray(customerName)) customerName = customerName[0];
             
             let customerEmail = r.fields['Customer Email'];
             if (Array.isArray(customerEmail)) customerEmail = customerEmail[0];
+            
+            // Check for USB drives in order items
+            let usbDriveCount = 0;
+            if (r.fields['Order Items'] && Array.isArray(r.fields['Order Items'])) {
+                try {
+                    const orderItemRecords = await base('Order Items').select({
+                        filterByFormula: `OR(${r.fields['Order Items'].map(id => `RECORD_ID()='${id}'`).join(',')})`,
+                        fields: ['Product Name', 'Quantity']
+                    }).firstPage();
+                    
+                    orderItemRecords.forEach(item => {
+                        const productName = Array.isArray(item.fields['Product Name']) 
+                            ? item.fields['Product Name'][0] 
+                            : item.fields['Product Name'];
+                        if (productName && productName.toLowerCase().includes('usb')) {
+                            usbDriveCount += item.fields['Quantity'] || 0;
+                        }
+                    });
+                } catch (err) {
+                    console.error('Error fetching order items:', err.message);
+                }
+            }
             
             return {
                 id: r.id,
@@ -121,12 +144,13 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
                     'Customer': customerName,
                     'Customer Email': customerEmail || '',
                     'Items Received': r.fields['Items Received'],
-                    'Status': r.fields['Status'],
+                    'Ops Status': r.fields['Ops Status'],
                     'Package Items Included': r.fields['Package Items Included'],
-                    'Check-In Notes': r.fields['Check-In Notes'] || ''
+                    'Check-In Notes': r.fields['Check-In Notes'] || '',
+                    'USB Drive Count': usbDriveCount
                 }
             };
-        });
+        }));
         
         res.json({ orders });
     } catch (error) {
@@ -287,11 +311,34 @@ app.get('/api/orders/tracking/:trackingNumber', async (req, res) => {
             }
         }
         
+        // Check for USB drives in order items
+        let usbDriveCount = 0;
+        if (record.fields['Order Items'] && Array.isArray(record.fields['Order Items'])) {
+            try {
+                const orderItemRecords = await base('Order Items').select({
+                    filterByFormula: `OR(${record.fields['Order Items'].map(id => `RECORD_ID()='${id}'`).join(',')})`,
+                    fields: ['Product Name', 'Quantity']
+                }).firstPage();
+                
+                orderItemRecords.forEach(item => {
+                    const productName = Array.isArray(item.fields['Product Name']) 
+                        ? item.fields['Product Name'][0] 
+                        : item.fields['Product Name'];
+                    if (productName && productName.toLowerCase().includes('usb')) {
+                        usbDriveCount += item.fields['Quantity'] || 0;
+                    }
+                });
+            } catch (err) {
+                console.error('Error fetching order items:', err.message);
+            }
+        }
+        
         res.json({
             id: record.id,
             fields: {
                 ...record.fields,
-                'Customer': customerName
+                'Customer': customerName,
+                'USB Drive Count': usbDriveCount
             }
         });
     } catch (error) {
@@ -375,9 +422,9 @@ app.post('/api/orders/:recordId/checkin', async (req, res) => {
             'Items Received': itemsReceived,
             'Extra Items': extraItems,
             'Extra Items Charge': extraCharge,
-            'Status': 'Received',
+            'Ops Status': 'Digitizing',
             ...(invoiceId && { 'Extra Items Invoice ID': invoiceId }),
-            ...(employeeName && { 'Assigned Employee': employeeName }),
+            ...(employeeId && { 'Assigned Employee': [employeeId] }),
             ...(notes && { 'Check-In Notes': notes })
         };
         
@@ -443,7 +490,7 @@ app.post('/api/orders/:recordId/complete', async (req, res) => {
             'Items Digitized': itemsDigitized,
             'Digitization Complete': true,
             'Digitization Completion Date': new Date().toISOString().split('T')[0],
-            'Status': 'Complete'
+            'Ops Status': 'Complete'
         };
         
         // Add Employee Link if we have employee info (it's a linked record field)
