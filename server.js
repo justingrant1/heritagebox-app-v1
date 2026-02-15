@@ -490,7 +490,7 @@ app.post('/api/orders/:recordId/complete', async (req, res) => {
             'Items Digitized': itemsDigitized,
             'Digitization Complete': true,
             'Digitization Completion Date': new Date().toISOString().split('T')[0],
-            'Ops Status': 'Complete'
+            'Ops Status': 'Quality Control'
         };
         
         // Add Employee Link if we have employee info (it's a linked record field)
