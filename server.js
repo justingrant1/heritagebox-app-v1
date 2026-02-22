@@ -74,9 +74,9 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
         
         console.log(`Fetching work queue for employee: ${employeeId}, name: ${employeeName}`);
         
-        // Get all non-complete orders and filter in code for more reliable matching
+        // Get only orders in 'Digitizing' status (not Quality Check, Complete, or other post-digitizing stages)
         const records = await base(ORDERS_TABLE).select({
-            filterByFormula: `{Ops Status}!='Complete'`,
+            filterByFormula: `{Ops Status}='Digitizing'`,
             fields: ['Order Number', 'Customer', 'Customer Name', 'Customer Email', 'Items Received', 'Ops Status', 'Package Items Included', 'Assigned Employee', 'Check-In Notes'],
             sort: [{ field: 'Created Time', direction: 'asc' }]
         }).firstPage();
@@ -151,8 +151,52 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
                 }
             };
         }));
+
+        // Fetch completed orders for this employee (digitized today)
+        const today = new Date().toISOString().split('T')[0];
+        let completedOrders = [];
+        try {
+            const completedRecords = await base(ORDERS_TABLE).select({
+                filterByFormula: `AND({Digitization Complete}=TRUE(), {Digitization Completion Date}='${today}')`,
+                fields: ['Order Number', 'Customer', 'Customer Name', 'Items Digitized', 'Ops Status', 'Digitization Completion Date', 'Employee Link', 'Assigned Employee'],
+                sort: [{ field: 'Digitization Completion Date', direction: 'desc' }]
+            }).firstPage();
+
+            const filteredCompleted = completedRecords.filter(r => {
+                // Match by Employee Link (linked record) or Assigned Employee (single select name)
+                const empLink = r.fields['Employee Link'];
+                const assignedEmployee = r.fields['Assigned Employee'];
+                
+                if (empLink && Array.isArray(empLink) && empLink.includes(employeeId)) return true;
+                if (assignedEmployee && employeeName) {
+                    if (typeof assignedEmployee === 'string') {
+                        return assignedEmployee.toLowerCase() === employeeName.toLowerCase();
+                    }
+                }
+                return false;
+            });
+
+            completedOrders = filteredCompleted.map(r => {
+                let customerName = r.fields['Customer Name'] || r.fields['Customer'];
+                if (Array.isArray(customerName)) customerName = customerName[0];
+                return {
+                    id: r.id,
+                    fields: {
+                        'Order Number': r.fields['Order Number'],
+                        'Customer': customerName,
+                        'Items Digitized': r.fields['Items Digitized'] || 0,
+                        'Ops Status': r.fields['Ops Status'],
+                        'Digitization Completion Date': r.fields['Digitization Completion Date']
+                    }
+                };
+            });
+
+            console.log(`Found ${completedOrders.length} completed orders for today`);
+        } catch (err) {
+            console.error('Error fetching completed orders:', err.message);
+        }
         
-        res.json({ orders });
+        res.json({ orders, completedOrders });
     } catch (error) {
         console.error('Error fetching work queue:', error.message);
         res.status(500).json({ error: 'Failed to fetch work queue' });
