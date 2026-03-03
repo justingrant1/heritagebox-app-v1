@@ -77,7 +77,7 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
         // Get only orders in 'Digitizing' status (not Quality Check, Complete, or other post-digitizing stages)
         const records = await base(ORDERS_TABLE).select({
             filterByFormula: `{Ops Status}='Digitizing'`,
-            fields: ['Order Number', 'Customer', 'Customer Name', 'Customer Email', 'Items Received', 'Ops Status', 'Package Items Included', 'Assigned Employee', 'Check-In Notes'],
+            fields: ['Order Number', 'Customer', 'Customer Name', 'Customer Email', 'Items Received', 'Ops Status', 'Package Items Included', 'Assigned Employee', 'Check-In Notes', 'Order Items'],
             sort: [{ field: 'Created Time', direction: 'asc' }]
         }).firstPage();
         
@@ -107,7 +107,7 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
         
         console.log(`Found ${filteredRecords.length} orders assigned to employee`);
         
-        // Process orders and fetch USB drive counts
+        // Process orders and fetch USB drive counts + expedited/rush status
         const orders = await Promise.all(filteredRecords.map(async (r) => {
             let customerName = r.fields['Customer Name'] || r.fields['Customer'];
             if (Array.isArray(customerName)) customerName = customerName[0];
@@ -115,8 +115,9 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
             let customerEmail = r.fields['Customer Email'];
             if (Array.isArray(customerEmail)) customerEmail = customerEmail[0];
             
-            // Check for USB drives in order items
+            // Check for USB drives and expedited/rush processing in order items
             let usbDriveCount = 0;
+            let expeditedType = null; // null | 'Expedited Processing' | 'Rush Processing'
             if (r.fields['Order Items'] && Array.isArray(r.fields['Order Items'])) {
                 try {
                     const orderItemRecords = await base('Order Items').select({
@@ -128,8 +129,15 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
                         const productName = Array.isArray(item.fields['Product Name']) 
                             ? item.fields['Product Name'][0] 
                             : item.fields['Product Name'];
-                        if (productName && productName.toLowerCase().includes('usb')) {
+                        if (!productName) return;
+                        const nameLower = productName.toLowerCase();
+                        if (nameLower.includes('usb')) {
                             usbDriveCount += item.fields['Quantity'] || 0;
+                        }
+                        if (nameLower.includes('expedited')) {
+                            expeditedType = 'Expedited Processing';
+                        } else if (nameLower.includes('rush')) {
+                            expeditedType = 'Rush Processing';
                         }
                     });
                 } catch (err) {
@@ -147,7 +155,8 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
                     'Ops Status': r.fields['Ops Status'],
                     'Package Items Included': r.fields['Package Items Included'],
                     'Check-In Notes': r.fields['Check-In Notes'] || '',
-                    'USB Drive Count': usbDriveCount
+                    'USB Drive Count': usbDriveCount,
+                    'Expedited Type': expeditedType
                 }
             };
         }));
@@ -355,8 +364,9 @@ app.get('/api/orders/tracking/:trackingNumber', async (req, res) => {
             }
         }
         
-        // Check for USB drives in order items
+        // Check for USB drives and expedited/rush processing in order items
         let usbDriveCount = 0;
+        let expeditedType = null; // null | 'Expedited Processing' | 'Rush Processing'
         if (record.fields['Order Items'] && Array.isArray(record.fields['Order Items'])) {
             try {
                 const orderItemRecords = await base('Order Items').select({
@@ -368,8 +378,15 @@ app.get('/api/orders/tracking/:trackingNumber', async (req, res) => {
                     const productName = Array.isArray(item.fields['Product Name']) 
                         ? item.fields['Product Name'][0] 
                         : item.fields['Product Name'];
-                    if (productName && productName.toLowerCase().includes('usb')) {
+                    if (!productName) return;
+                    const nameLower = productName.toLowerCase();
+                    if (nameLower.includes('usb')) {
                         usbDriveCount += item.fields['Quantity'] || 0;
+                    }
+                    if (nameLower.includes('expedited')) {
+                        expeditedType = 'Expedited Processing';
+                    } else if (nameLower.includes('rush')) {
+                        expeditedType = 'Rush Processing';
                     }
                 });
             } catch (err) {
@@ -382,7 +399,8 @@ app.get('/api/orders/tracking/:trackingNumber', async (req, res) => {
             fields: {
                 ...record.fields,
                 'Customer': customerName,
-                'USB Drive Count': usbDriveCount
+                'USB Drive Count': usbDriveCount,
+                'Expedited Type': expeditedType
             }
         });
     } catch (error) {
