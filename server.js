@@ -32,7 +32,7 @@ const BASE_PAY = 7.50;
 const PER_ITEM_PAY = 2.00;
 const ORDERS_TABLE = 'Orders';
 const EMPLOYEES_TABLE = 'Employees';
-const PAY_PERIODS_TABLE = 'Pay_Periods';
+const PAY_PERIODS_TABLE = 'Pay Periods';
 
 // ============================================
 // EMPLOYEE ROUTES
@@ -213,7 +213,7 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
 });
 
 /**
- * Get employee's pay information
+ * Get employee's pay information (pay-period-aware)
  * GET /api/employees/:employeeId/pay
  */
 app.get('/api/employees/:employeeId/pay', async (req, res) => {
@@ -223,86 +223,101 @@ app.get('/api/employees/:employeeId/pay', async (req, res) => {
         
         console.log(`Fetching pay info for employee: ${employeeId}, name: ${employeeName}`);
         
-        // Get all completed orders and filter in code
-        const allCompleted = await base(ORDERS_TABLE).select({
-            filterByFormula: `{Digitization Complete}=TRUE()`,
-            fields: ['Order Number', 'Items Digitized', 'Base Pay', 'Per Item Pay', 'Total Order Pay', 'Digitization Completion Date', 'Employee Link'],
-            sort: [{ field: 'Digitization Completion Date', direction: 'desc' }]
+        // Fetch all pay periods and filter for this employee in code
+        const allPeriods = await base(PAY_PERIODS_TABLE).select({
+            sort: [{ field: 'Start Date', direction: 'desc' }]
         }).firstPage();
         
-        console.log(`Found ${allCompleted.length} total completed orders`);
-        
-        // Filter for this employee's orders
-        const completedOrders = allCompleted.filter(r => {
-            const empLink = r.fields['Employee Link'];
-            if (!empLink) return false;
-            
-            // Handle linked record (array of IDs)
-            if (Array.isArray(empLink)) {
-                return empLink.includes(employeeId);
-            }
-            return empLink === employeeId;
+        const employeePeriods = allPeriods.filter(p => {
+            const employees = p.fields['Employee'];
+            if (!employees) return false;
+            if (Array.isArray(employees)) return employees.includes(employeeId);
+            return employees === employeeId;
         });
         
-        console.log(`Found ${completedOrders.length} orders for employee ${employeeId}`);
+        console.log(`Found ${employeePeriods.length} pay periods for employee ${employeeId}`);
         
-        // Calculate stats
-        let totalEarnings = 0;
-        let totalOrders = 0;
-        let totalItems = 0;
-        
-        const recentOrders = completedOrders.slice(0, 5).map(r => {
-            const itemsDigitized = r.fields['Items Digitized'] || 0;
-            const pay = (r.fields['Total Order Pay'] || 0);
-            totalEarnings += pay;
-            totalOrders++;
-            totalItems += itemsDigitized;
+        // For each pay period, fetch the linked orders and calculate totals
+        const payPeriods = await Promise.all(employeePeriods.map(async (period) => {
+            const linkedOrderIds = period.fields['Orders'] || [];
+            
+            let periodOrders = [];
+            let totalPay = 0;
+            let totalItems = 0;
+            let totalOrders = 0;
+            
+            if (linkedOrderIds.length > 0) {
+                try {
+                    const orderRecords = await base(ORDERS_TABLE).select({
+                        filterByFormula: `OR(${linkedOrderIds.map(id => `RECORD_ID()='${id}'`).join(',')})`,
+                        fields: ['Order Number', 'Items Digitized', 'Total Order Pay', 'Digitization Completion Date', 'Base Pay', 'Per Item Pay']
+                    }).firstPage();
+                    
+                    orderRecords.forEach(r => {
+                        const pay = r.fields['Total Order Pay'] || 0;
+                        const items = r.fields['Items Digitized'] || 0;
+                        totalPay += pay;
+                        totalItems += items;
+                        totalOrders++;
+                        periodOrders.push({
+                            id: r.id,
+                            orderNumber: r.fields['Order Number'],
+                            itemsDigitized: items,
+                            basePay: r.fields['Base Pay'] || 0,
+                            perItemPay: r.fields['Per Item Pay'] || 0,
+                            pay,
+                            date: r.fields['Digitization Completion Date']
+                        });
+                    });
+                    
+                    // Sort orders by date descending
+                    periodOrders.sort((a, b) => {
+                        if (!a.date) return 1;
+                        if (!b.date) return -1;
+                        return new Date(b.date) - new Date(a.date);
+                    });
+                } catch (err) {
+                    console.error('Error fetching orders for pay period:', err.message);
+                }
+            }
             
             return {
-                id: r.id,
-                orderNumber: r.fields['Order Number'],
-                itemsDigitized,
-                pay,
-                date: r.fields['Digitization Completion Date']
+                id: period.id,
+                name: period.fields['Pay Period Name'] || 'Unnamed Period',
+                startDate: period.fields['Start Date'],
+                endDate: period.fields['End Date'],
+                status: period.fields['Status'] || 'Draft',
+                datePaid: period.fields['Date Paid'],
+                totalPay,
+                totalItems,
+                totalOrders,
+                orders: periodOrders
             };
-        });
+        }));
         
-        // Calculate totals from all orders
-        completedOrders.slice(5).forEach(r => {
-            totalEarnings += (r.fields['Total Order Pay'] || 0);
-            totalOrders++;
-            totalItems += (r.fields['Items Digitized'] || 0);
-        });
+        // Determine current period:
+        // 1. First look for a Draft period whose end date hasn't passed yet
+        // 2. Fall back to any non-Paid period
+        // 3. Fall back to most recent period
+        const today = new Date().toISOString().split('T')[0];
         
-        console.log(`Total earnings: $${totalEarnings}, orders: ${totalOrders}, items: ${totalItems}`);
+        let currentPeriod = payPeriods.find(p =>
+            p.status === 'Draft' && (!p.endDate || p.endDate >= today)
+        );
         
-        // Get current pay period
-        let currentPeriod = { name: 'Current Period', totalEarnings: 0 };
-        try {
-            const periods = await base(PAY_PERIODS_TABLE).select({
-                filterByFormula: `{Status}!='Paid'`,
-                sort: [{ field: 'Start Date', direction: 'desc' }],
-                maxRecords: 1
-            }).firstPage();
-            
-            if (periods.length > 0) {
-                currentPeriod.name = periods[0].fields['Pay Period Name'] || 'Current Period';
-            }
-        } catch (e) {
-            console.log('Could not fetch pay periods:', e.message);
+        if (!currentPeriod) {
+            currentPeriod = payPeriods.find(p => p.status !== 'Paid');
         }
         
-        // Calculate current period earnings (simplified - all unpaid orders)
-        currentPeriod.totalEarnings = totalEarnings;
+        if (!currentPeriod && payPeriods.length > 0) {
+            currentPeriod = payPeriods[0];
+        }
+        
+        console.log(`Current period: ${currentPeriod?.name || 'none'}, total pay: $${currentPeriod?.totalPay || 0}`);
         
         res.json({
-            currentPeriod,
-            stats: {
-                ordersCompleted: totalOrders,
-                itemsDigitized: totalItems,
-                totalEarnings
-            },
-            recentOrders
+            payPeriods,
+            currentPeriodId: currentPeriod?.id || null
         });
     } catch (error) {
         console.error('Error fetching pay info:', error.message);
