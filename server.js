@@ -28,8 +28,18 @@ const airtable = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY });
 const base = airtable.base(process.env.AIRTABLE_BASE_ID);
 
 const EXTRA_ITEM_PRICE = 15.00;
-const BASE_PAY = 7.50;
 const PER_ITEM_PAY = 2.00;
+
+// Fallback base pay by package type (used if Airtable Base Pay field is empty)
+const BASE_PAY_BY_PACKAGE_TYPE = {
+    'Starter': 15.00,
+    'Popular': 22.50,
+    'Dusty Rose': 30.00,
+    'Eternal': 37.50
+};
+
+const getBasePayFallback = (packageType) => BASE_PAY_BY_PACKAGE_TYPE[packageType] || 0;
+
 const ORDERS_TABLE = 'Orders';
 const EMPLOYEES_TABLE = 'Employees';
 const PAY_PERIODS_TABLE = 'Pay Periods';
@@ -77,7 +87,7 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
         // Get only orders in 'Digitizing' status (not Quality Check, Complete, or other post-digitizing stages)
         const records = await base(ORDERS_TABLE).select({
             filterByFormula: `{Ops Status}='Digitizing'`,
-            fields: ['Order Number', 'Customer', 'Customer Name', 'Customer Email', 'Items Received', 'Ops Status', 'Package Items Included', 'Assigned Employee', 'Check-In Notes', 'Order Items'],
+            fields: ['Order Number', 'Customer', 'Customer Name', 'Customer Email', 'Items Received', 'Ops Status', 'Package Items Included', 'Assigned Employee', 'Check-In Notes', 'Order Items', 'Base Pay', 'Per Item Pay', 'Package Type'],
             sort: [{ field: 'Created Time', direction: 'asc' }]
         }).firstPage();
         
@@ -145,6 +155,10 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
                 }
             }
             
+            const packageType = r.fields['Package Type'] || '';
+            const basePay = r.fields['Base Pay'] != null ? r.fields['Base Pay'] : getBasePayFallback(packageType);
+            const perItemPay = r.fields['Per Item Pay'] != null ? r.fields['Per Item Pay'] : PER_ITEM_PAY;
+
             return {
                 id: r.id,
                 fields: {
@@ -156,7 +170,10 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
                     'Package Items Included': r.fields['Package Items Included'],
                     'Check-In Notes': r.fields['Check-In Notes'] || '',
                     'USB Drive Count': usbDriveCount,
-                    'Expedited Type': expeditedType
+                    'Expedited Type': expeditedType,
+                    'Package Type': packageType,
+                    'Base Pay': basePay,
+                    'Per Item Pay': perItemPay
                 }
             };
         }));
@@ -556,11 +573,6 @@ app.post('/api/orders/:recordId/complete', async (req, res) => {
         
         console.log(`Completing order ${recordId} with ${itemsDigitized} items digitized by ${employeeName || employeeId}`);
         
-        // Calculate pay for response (Airtable will calculate via formulas)
-        const basePay = BASE_PAY;
-        const perItemPay = itemsDigitized * PER_ITEM_PAY;
-        const totalPay = basePay + perItemPay;
-        
         // Update order - don't include computed fields (Base Pay, Per Item Pay, Total Order Pay)
         // Those are formulas in Airtable that auto-calculate
         const updateFields = {
@@ -577,13 +589,26 @@ app.post('/api/orders/:recordId/complete', async (req, res) => {
         
         console.log('Update fields:', JSON.stringify(updateFields));
         
-        const updatedRecord = await base(ORDERS_TABLE).update(recordId, updateFields);
+        await base(ORDERS_TABLE).update(recordId, updateFields);
+
+        // Re-fetch the record so Airtable formula fields (Base Pay, Per Item Pay, Total Order Pay) are current
+        const freshRecord = await base(ORDERS_TABLE).find(recordId);
+        const packageType = freshRecord.fields['Package Type'] || '';
+        const basePay = freshRecord.fields['Base Pay'] != null
+            ? freshRecord.fields['Base Pay']
+            : getBasePayFallback(packageType);
+        const perItemPay = freshRecord.fields['Per Item Pay'] != null
+            ? freshRecord.fields['Per Item Pay']
+            : itemsDigitized * PER_ITEM_PAY;
+        const totalPay = freshRecord.fields['Total Order Pay'] != null
+            ? freshRecord.fields['Total Order Pay']
+            : basePay + perItemPay;
         
-        console.log(`Order ${recordId} completed. Pay: $${totalPay}`);
+        console.log(`Order ${recordId} completed. Base: $${basePay}, PerItem: $${perItemPay}, Total: $${totalPay}`);
         
         res.json({
             success: true,
-            order: { id: updatedRecord.id, fields: updatedRecord.fields },
+            order: { id: freshRecord.id, fields: freshRecord.fields },
             pay: { basePay, perItemPay, totalPay }
         });
         

@@ -54,8 +54,17 @@
         const CONFIG = {
             API_BASE_URL: 'https://heritagebox-app-v1.onrender.com',
             EXTRA_ITEM_PRICE: 15.00,
-            BASE_PAY: 7.50,
-            PER_ITEM_PAY: 2.00,
+            PER_ITEM_PAY: 2.00, // fallback only
+            // Base pay is now dynamic per order (from Airtable Base Pay field / Package Type)
+            BASE_PAY_BY_PACKAGE_TYPE: {
+                'Starter': 15.00,
+                'Popular': 22.50,
+                'Dusty Rose': 30.00,
+                'Eternal': 37.50,
+            },
+            getBasePayFallback(packageType) {
+                return this.BASE_PAY_BY_PACKAGE_TYPE[packageType] || 0;
+            }
         };
 
         // ============================================
@@ -577,7 +586,13 @@
             }
 
             if (selectedOrder) {
-                const pay = CONFIG.BASE_PAY + (parseInt(itemsDigitized) || 0) * CONFIG.PER_ITEM_PAY;
+                const orderBasePay = selectedOrder.fields['Base Pay'] != null
+                    ? selectedOrder.fields['Base Pay']
+                    : CONFIG.getBasePayFallback(selectedOrder.fields['Package Type'] || '');
+                const orderPerItemPay = selectedOrder.fields['Per Item Pay'] != null
+                    ? selectedOrder.fields['Per Item Pay']
+                    : CONFIG.PER_ITEM_PAY;
+                const pay = orderBasePay + (parseInt(itemsDigitized) || 0) * orderPerItemPay;
                 return (
                     <div className="slide-up">
                         {/* Back Button */}
@@ -689,11 +704,11 @@
                             <div className="space-y-2">
                                 <div className="flex justify-between">
                                     <span className="text-slate-400">Base pay</span>
-                                    <span className="text-white">${CONFIG.BASE_PAY.toFixed(2)}</span>
+                                    <span className="text-white">${orderBasePay.toFixed(2)}</span>
                                 </div>
                                 <div className="flex justify-between">
-                                    <span className="text-slate-400">Per item ({itemsDigitized || 0} × ${CONFIG.PER_ITEM_PAY.toFixed(2)})</span>
-                                    <span className="text-white">${((parseInt(itemsDigitized) || 0) * CONFIG.PER_ITEM_PAY).toFixed(2)}</span>
+                                    <span className="text-slate-400">Per item ({itemsDigitized || 0} × ${orderPerItemPay.toFixed(2)})</span>
+                                    <span className="text-white">${((parseInt(itemsDigitized) || 0) * orderPerItemPay).toFixed(2)}</span>
                                 </div>
                                 <div className="border-t border-slate-700 pt-2 flex justify-between">
                                     <span className="text-green-400 font-semibold">Total</span>
