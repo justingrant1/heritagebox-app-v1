@@ -157,7 +157,7 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
             
             const packageType = r.fields['Package Type'] || '';
             const basePay = r.fields['Base Pay'] != null ? r.fields['Base Pay'] : getBasePayFallback(packageType);
-            const perItemPay = r.fields['Per Item Pay'] != null ? r.fields['Per Item Pay'] : PER_ITEM_PAY;
+            const perItemPay = r.fields['Per Item Pay'] || PER_ITEM_PAY;
 
             return {
                 id: r.id,

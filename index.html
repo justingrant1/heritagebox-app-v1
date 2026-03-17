@@ -589,9 +589,7 @@
                 const orderBasePay = selectedOrder.fields['Base Pay'] != null
                     ? selectedOrder.fields['Base Pay']
                     : CONFIG.getBasePayFallback(selectedOrder.fields['Package Type'] || '');
-                const orderPerItemPay = selectedOrder.fields['Per Item Pay'] != null
-                    ? selectedOrder.fields['Per Item Pay']
-                    : CONFIG.PER_ITEM_PAY;
+                const orderPerItemPay = selectedOrder.fields['Per Item Pay'] || CONFIG.PER_ITEM_PAY;
                 const pay = orderBasePay + (parseInt(itemsDigitized) || 0) * orderPerItemPay;
                 return (
                     <div className="slide-up">
