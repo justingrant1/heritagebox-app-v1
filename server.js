@@ -313,22 +313,17 @@ app.get('/api/employees/:employeeId/pay', async (req, res) => {
         }));
         
         // Determine current period:
-        // 1. First look for a Draft period whose end date hasn't passed yet
-        // 2. Fall back to any non-Paid period
-        // 3. Fall back to most recent period
-        const today = new Date().toISOString().split('T')[0];
+        // payPeriods is already sorted by Start Date desc (newest first)
+        // 1. First look for any non-Paid period (Draft, Ready for Payment, etc.) — newest first
+        // 2. Fall back to the most recent period (even if Paid)
         
-        let currentPeriod = payPeriods.find(p =>
-            p.status === 'Draft' && (!p.endDate || p.endDate >= today)
-        );
-        
-        if (!currentPeriod) {
-            currentPeriod = payPeriods.find(p => p.status !== 'Paid');
-        }
+        let currentPeriod = payPeriods.find(p => p.status !== 'Paid');
         
         if (!currentPeriod && payPeriods.length > 0) {
             currentPeriod = payPeriods[0];
         }
+        
+        console.log(`All periods for employee: ${employeePeriods.map(p => `${p.fields['Pay Period Name']} (${p.fields['Status']})`).join(', ')}`);
         
         console.log(`Current period: ${currentPeriod?.name || 'none'}, total pay: $${currentPeriod?.totalPay || 0}`);
         

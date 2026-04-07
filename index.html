@@ -898,7 +898,13 @@
 
             const formatDate = (dateStr) => {
                 if (!dateStr) return '—';
-                const d = new Date(dateStr + 'T00:00:00');
+                // Handle both YYYY-MM-DD and full ISO strings
+                // Parse manually to avoid timezone-shift issues across browsers
+                const match = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+                if (!match) return dateStr; // return raw if unrecognized format
+                const [, year, month, day] = match;
+                const d = new Date(Number(year), Number(month) - 1, Number(day));
+                if (isNaN(d.getTime())) return dateStr;
                 return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
             };
 
