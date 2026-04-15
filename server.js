@@ -316,17 +316,37 @@ app.get('/api/employees/:employeeId/pay', async (req, res) => {
                 let orderRecords = [];
 
                 if (isDraft) {
-                    // Dynamic query: find all completed orders for this employee in the date range
-                    let formula = `AND({Digitization Complete}=TRUE(), {Employee Link}='${employeeId}'`;
-                    if (startDate) formula += `, {Digitization Completion Date}>='${startDate}'`;
-                    if (endDate) formula += `, {Digitization Completion Date}<='${endDate}'`;
-                    formula += `)`;
+                    // Dynamic query: find all completed orders in the date range, then filter by employee in code.
+                    // Note: {Employee Link} is a linked record field — Airtable resolves it to display text in
+                    // formulas, not the record ID, so we can't reliably filter by it in the formula.
+                    let dateFilters = `{Digitization Complete}=TRUE()`;
+                    if (startDate && endDate) {
+                        dateFilters = `AND({Digitization Complete}=TRUE(), {Digitization Completion Date}>='${startDate}', {Digitization Completion Date}<='${endDate}')`;
+                    } else if (startDate) {
+                        dateFilters = `AND({Digitization Complete}=TRUE(), {Digitization Completion Date}>='${startDate}')`;
+                    }
 
-                    orderRecords = await base(ORDERS_TABLE).select({
-                        filterByFormula: formula,
-                        fields: ['Order Number', 'Items Digitized', 'Total Order Pay', 'Digitization Completion Date', 'Base Pay', 'Per Item Pay'],
+                    const allCompleted = await base(ORDERS_TABLE).select({
+                        filterByFormula: dateFilters,
+                        fields: ['Order Number', 'Items Digitized', 'Total Order Pay', 'Digitization Completion Date', 'Base Pay', 'Per Item Pay', 'Employee Link', 'Assigned Employee'],
                         sort: [{ field: 'Digitization Completion Date', direction: 'desc' }]
                     }).firstPage();
+
+                    // Filter by employee in code — handles both linked record IDs and name-based assignment
+                    orderRecords = allCompleted.filter(r => {
+                        const empLink = r.fields['Employee Link'];
+                        const assignedEmployee = r.fields['Assigned Employee'];
+                        if (empLink && Array.isArray(empLink) && empLink.includes(employeeId)) return true;
+                        if (assignedEmployee && employeeName) {
+                            if (typeof assignedEmployee === 'string') {
+                                return assignedEmployee.toLowerCase() === employeeName.toLowerCase();
+                            }
+                            if (Array.isArray(assignedEmployee)) {
+                                return assignedEmployee.includes(employeeId);
+                            }
+                        }
+                        return false;
+                    });
                 } else if (linkedOrderIds.length > 0) {
                     // Finalized period: use manually linked orders
                     orderRecords = await base(ORDERS_TABLE).select({
