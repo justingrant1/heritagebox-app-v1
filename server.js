@@ -178,12 +178,53 @@ app.get('/api/employees/:employeeId/work', async (req, res) => {
             };
         }));
 
-        // Fetch completed orders for this employee (digitized today)
-        const today = new Date().toISOString().split('T')[0];
+        // Fetch completed orders for this employee (current pay period)
+        // Determine the date range from the employee's current pay period
+        let periodStartDate = null;
+        let periodEndDate = null;
+        try {
+            const allPeriods = await base(PAY_PERIODS_TABLE).select({
+                sort: [{ field: 'Start Date', direction: 'desc' }]
+            }).firstPage();
+
+            const employeePeriods = allPeriods.filter(p => {
+                const employees = p.fields['Employee'];
+                if (!employees) return false;
+                if (Array.isArray(employees)) return employees.includes(employeeId);
+                return employees === employeeId;
+            });
+
+            if (employeePeriods.length > 0) {
+                // Find current (non-Paid) period first, then fall back to most recent
+                const currentPeriod = employeePeriods.find(p => p.fields['Status'] !== 'Paid') || employeePeriods[0];
+                periodStartDate = currentPeriod.fields['Start Date'] || null;
+                periodEndDate = currentPeriod.fields['End Date'] || null;
+
+                // If no current period found but there are past periods, use the most recent end date as start
+                if (!currentPeriod && employeePeriods.length > 0) {
+                    periodStartDate = employeePeriods[0].fields['End Date'] || null;
+                    periodEndDate = null;
+                }
+            }
+        } catch (err) {
+            console.error('Error fetching pay periods for completed orders:', err.message);
+        }
+
+        // Build the completed orders filter formula
+        let completedFilter;
+        if (periodStartDate && periodEndDate) {
+            completedFilter = `AND({Digitization Complete}=TRUE(), {Digitization Completion Date}>='${periodStartDate}', {Digitization Completion Date}<='${periodEndDate}')`;
+        } else if (periodStartDate) {
+            completedFilter = `AND({Digitization Complete}=TRUE(), {Digitization Completion Date}>='${periodStartDate}')`;
+        } else {
+            // No pay period info at all — show all completed orders
+            completedFilter = `{Digitization Complete}=TRUE()`;
+        }
+
         let completedOrders = [];
         try {
             const completedRecords = await base(ORDERS_TABLE).select({
-                filterByFormula: `AND({Digitization Complete}=TRUE(), {Digitization Completion Date}='${today}')`,
+                filterByFormula: completedFilter,
                 fields: ['Order Number', 'Customer', 'Customer Name', 'Items Digitized', 'Ops Status', 'Digitization Completion Date', 'Employee Link', 'Assigned Employee'],
                 sort: [{ field: 'Digitization Completion Date', direction: 'desc' }]
             }).firstPage();
