@@ -295,48 +295,71 @@ app.get('/api/employees/:employeeId/pay', async (req, res) => {
         
         console.log(`Found ${employeePeriods.length} pay periods for employee ${employeeId}`);
         
-        // For each pay period, fetch the linked orders and calculate totals
+        // For each pay period, fetch orders and calculate totals.
+        // - Paid/closed periods: use manually linked order IDs (finalized payroll)
+        // - Draft/open periods: dynamically query all completed orders by date range
+        //   so employees always see their work in real-time without manual linking.
         const payPeriods = await Promise.all(employeePeriods.map(async (period) => {
+            const periodStatus = period.fields['Status'] || 'Draft';
             const linkedOrderIds = period.fields['Orders'] || [];
-            
+            const startDate = period.fields['Start Date'] || null;
+            const endDate = period.fields['End Date'] || null;
+
             let periodOrders = [];
             let totalPay = 0;
             let totalItems = 0;
             let totalOrders = 0;
-            
-            if (linkedOrderIds.length > 0) {
-                try {
-                    const orderRecords = await base(ORDERS_TABLE).select({
+
+            const isDraft = periodStatus !== 'Paid' && periodStatus !== 'Ready for Payment';
+
+            try {
+                let orderRecords = [];
+
+                if (isDraft) {
+                    // Dynamic query: find all completed orders for this employee in the date range
+                    let formula = `AND({Digitization Complete}=TRUE(), {Employee Link}='${employeeId}'`;
+                    if (startDate) formula += `, {Digitization Completion Date}>='${startDate}'`;
+                    if (endDate) formula += `, {Digitization Completion Date}<='${endDate}'`;
+                    formula += `)`;
+
+                    orderRecords = await base(ORDERS_TABLE).select({
+                        filterByFormula: formula,
+                        fields: ['Order Number', 'Items Digitized', 'Total Order Pay', 'Digitization Completion Date', 'Base Pay', 'Per Item Pay'],
+                        sort: [{ field: 'Digitization Completion Date', direction: 'desc' }]
+                    }).firstPage();
+                } else if (linkedOrderIds.length > 0) {
+                    // Finalized period: use manually linked orders
+                    orderRecords = await base(ORDERS_TABLE).select({
                         filterByFormula: `OR(${linkedOrderIds.map(id => `RECORD_ID()='${id}'`).join(',')})`,
                         fields: ['Order Number', 'Items Digitized', 'Total Order Pay', 'Digitization Completion Date', 'Base Pay', 'Per Item Pay']
                     }).firstPage();
-                    
-                    orderRecords.forEach(r => {
-                        const pay = r.fields['Total Order Pay'] || 0;
-                        const items = r.fields['Items Digitized'] || 0;
-                        totalPay += pay;
-                        totalItems += items;
-                        totalOrders++;
-                        periodOrders.push({
-                            id: r.id,
-                            orderNumber: r.fields['Order Number'],
-                            itemsDigitized: items,
-                            basePay: r.fields['Base Pay'] || 0,
-                            perItemPay: r.fields['Per Item Pay'] || 0,
-                            pay,
-                            date: r.fields['Digitization Completion Date']
-                        });
-                    });
-                    
-                    // Sort orders by date descending
-                    periodOrders.sort((a, b) => {
-                        if (!a.date) return 1;
-                        if (!b.date) return -1;
-                        return new Date(b.date) - new Date(a.date);
-                    });
-                } catch (err) {
-                    console.error('Error fetching orders for pay period:', err.message);
                 }
+
+                orderRecords.forEach(r => {
+                    const pay = r.fields['Total Order Pay'] || 0;
+                    const items = r.fields['Items Digitized'] || 0;
+                    totalPay += pay;
+                    totalItems += items;
+                    totalOrders++;
+                    periodOrders.push({
+                        id: r.id,
+                        orderNumber: r.fields['Order Number'],
+                        itemsDigitized: items,
+                        basePay: r.fields['Base Pay'] || 0,
+                        perItemPay: r.fields['Per Item Pay'] || 0,
+                        pay,
+                        date: r.fields['Digitization Completion Date']
+                    });
+                });
+
+                // Sort orders by date descending
+                periodOrders.sort((a, b) => {
+                    if (!a.date) return 1;
+                    if (!b.date) return -1;
+                    return new Date(b.date) - new Date(a.date);
+                });
+            } catch (err) {
+                console.error('Error fetching orders for pay period:', err.message);
             }
             
             return {
